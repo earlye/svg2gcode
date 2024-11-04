@@ -1,8 +1,10 @@
-*
-
 !.gitignore
 !*.go
 !go.mod
 !go.sum
 !Makefile
 !*.md
+
+bin
+.*
+
