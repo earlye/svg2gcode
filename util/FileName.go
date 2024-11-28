@@ -4,7 +4,7 @@ import (
 	"os"
 )
 
-func Name[T interface{}](value T, defaultValue string) (result string) {
+func FileName[T interface{}](value T, defaultValue string) (result string) {
 	filePtr, ok := any(value).(*os.File)
 	if ok {
 		result = filePtr.Name()

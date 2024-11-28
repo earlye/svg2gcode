@@ -157,7 +157,7 @@ func ParseTransformList(input string) (result []Transform, err error) {
 			return
 		}
 
-		log.Printf("[INFO] ParseTransformList: remaining: %s match: %#v\n", remaining, match)
+		log.Printf("[INFO] ParseTransformList: remaining: '%s' match: '%#v'\n", remaining, match)
 		remaining = util.RemoveLeadingWhitespaceComma(remaining[len(match[0]):])
 		name := match[2]
 		parametersString := match[3]
@@ -171,7 +171,6 @@ func ParseTransformList(input string) (result []Transform, err error) {
 		entry := Transform {Name: name, Parameters: parameters}
 		result = append(result, entry)
 	}
-	return
 }
 
 var TransformParameterRegex = regexp.MustCompile(NumberPattern)
@@ -181,16 +180,14 @@ func ParseTransformParameters(input string) (result []float64, err error) {
 		match := TransformParameterRegex.FindStringSubmatch(remaining)
 		if len(match) == 0 {
 			if len(remaining) != 0 {
-				err = errors.Errorf("Failed to consume all of transform list.")
+				err = errors.Errorf("Failed to consume all of transform parameters list.")
 			}
 			return
 		}
 
 		var value float64
 		value, err = strconv.ParseFloat(match[1], 64)
-		if err != nil {
-			return
-		}
+		util.PanicOnError(err)
 		remaining = util.RemoveLeadingWhitespaceComma(remaining[len(match[0]):])
 		result = append(result, value)
 	}

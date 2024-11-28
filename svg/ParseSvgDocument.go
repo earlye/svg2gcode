@@ -11,7 +11,7 @@ import (
 )
 
 func (this* XmlElement) Decode(startElement xml.StartElement, decoder *xml.Decoder) (err error) {
-	log.Printf("[DEBUG] XmlElement::Decode: element: %#v", startElement.Name)
+	log.Printf("[TRACE] XmlElement::Decode: element: %#v", startElement.Name)
 	// copy startElement into this
 	this.Name = startElement.Name
 	this.Attributes = map[xml.Name]string{}
@@ -19,26 +19,26 @@ func (this* XmlElement) Decode(startElement xml.StartElement, decoder *xml.Decod
 		this.Attributes[attr.Name] = attr.Value
 	}
 
-	log.Printf("[DEBUG] XmlElement::Decode: Decoding children of: %#v", startElement.Name)
+	log.Printf("[TRACE] XmlElement::Decode: Decoding children of: %#v", startElement.Name)
 	// recursive. You know, for the children. Get it? For the _children_!
 	for {
 		var token xml.Token
 		token, err = decoder.Token()
-		log.Printf("[DEBUG] XmlElement::Decode: token: %#v err: %#v", token, err)
+		log.Printf("[TRACE] XmlElement::Decode: token: %#v err: %#v", token, err)
 		if err != nil {
 			return
 		}
 		
 		switch typedToken := token.(type) {
 		case xml.StartElement:
-			log.Printf("[DEBUG] XmlElement::Decode: xml.StartElement: %s Parent: %s", typedToken.Name, this.Name)
+			log.Printf("[TRACE] XmlElement::Decode: xml.StartElement: %s Parent: %s", typedToken.Name, this.Name)
 			child := &XmlElement{}
 			child.Parent = this
 			child.Token = xml.CopyToken(typedToken)
 			child.Decode(typedToken, decoder)
 			this.Children = append(this.Children, child)
 		case xml.EndElement:
-			log.Printf("[DEBUG] XmlElement::Decode: xml.EndElement: %#v", typedToken.Name)
+			log.Printf("[TRACE] XmlElement::Decode: xml.EndElement: %#v", typedToken.Name)
 			// It is not necessary to check the validity, as xml.Decoder does this for us.
 			return
 		default:
@@ -50,10 +50,16 @@ func (this* XmlElement) Decode(startElement xml.StartElement, decoder *xml.Decod
 	}
 }
 
-func DecodeSvgDocument(decoder *xml.Decoder) (result Document, err error) {
+type DecoderTokenFunction = func(decoder *xml.Decoder) (xml.Token, error);
+func xmlDecoderToken(decoder *xml.Decoder) (xml.Token, error) {
+	log.Printf("[TRACE] xmlDecoderToken(decoder: %p)\n", decoder)
+	return decoder.Token()
+}
+
+func DecodeSvgDocument(decoder *xml.Decoder, decoderToken DecoderTokenFunction) (result Document, err error) {
 	for {
 		var token xml.Token
-		token, err = decoder.Token()
+		token, err = decoderToken(decoder)
 		if err == io.EOF {
 			err = fmt.Errorf("input was empty");
 			return
@@ -63,7 +69,7 @@ func DecodeSvgDocument(decoder *xml.Decoder) (result Document, err error) {
 		}
 		switch typedToken := token.(type) {
 		case xml.StartElement:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.StartElement: %s", typedToken.Name)
+			log.Printf("[TRACE] DecodeSvgDocument: xml.StartElement: %s", typedToken.Name)
 			if typedToken.Name.Local != "svg" {
 				err = fmt.Errorf("Unexpected top-level token")
 				return
@@ -76,54 +82,60 @@ func DecodeSvgDocument(decoder *xml.Decoder) (result Document, err error) {
 			err = result.XmlElement.Decode(typedToken, decoder)
 			return // HAPPY PATH
 		case xml.CharData:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.CharData: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgDocument: xml.CharData: %s", typedToken);
 			result.FrontMatter = append(result.FrontMatter, xml.CopyToken(token))
 		case xml.ProcInst:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.ProcInst: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgDocument: xml.ProcInst: %s", typedToken);
 			result.FrontMatter = append(result.FrontMatter, xml.CopyToken(token))
 		case xml.Comment:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.Comment: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgDocument: xml.Comment: %s", typedToken);
 			result.FrontMatter = append(result.FrontMatter, xml.CopyToken(token))
 		default:
-			log.Printf("[ERROR] ParseSvgDocument: unexpected token type: %#v\n", token) /// cover: unreachable
+			log.Printf("[ERROR] DecodeSvgDocument: unexpected token type: %#v\n", token) /// cover: unreachable
 			err = fmt.Errorf("unexpected token type") /// cover: unreachable
 			return /// cover: unreachable
 		}
 	}
 }
 
-func ParseSvgDocument(input io.Reader) (result Document, err error) {
-	decoder := xml.NewDecoder(input)
-	decoder.CharsetReader = charset.NewReaderLabel
-
-	result, err = DecodeSvgDocument(decoder)
-	if err != nil {
-		return
-	}
-
+func DecodeSvgBackmatter(result *Document, decoder *xml.Decoder, decoderToken DecoderTokenFunction) (err error) {
 	for {
 		var token xml.Token
-		token, err = decoder.Token()
+		token, err = decoderToken(decoder)
 		if err == io.EOF {
 			err = nil
 			return
 		}
 		switch typedToken := token.(type) {
 		case xml.CharData:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.CharData: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgBackmatter: xml.CharData: %s", typedToken);
 			result.BackMatter = append(result.BackMatter, xml.CopyToken(token))
 		case xml.ProcInst:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.ProcInst: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgBackmatter: xml.ProcInst: %s", typedToken);
 			result.BackMatter = append(result.BackMatter, xml.CopyToken(token))
 		case xml.Comment:
-			log.Printf("[DEBUG] ParseSvgDocument: xml.Comment: %s", typedToken);
+			log.Printf("[TRACE] DecodeSvgBackmatter: xml.Comment: %s", typedToken);
 			result.BackMatter = append(result.BackMatter, xml.CopyToken(token))
 		default:
-			log.Printf("[ERROR] ParseSvgDocument: unexpected token type: %#v\n", token) /// cover: unreachable
+			log.Printf("[ERROR] DecodeSvgBackmatter: unexpected token type: %#v\n", token) /// cover: unreachable
 			err = fmt.Errorf("unexpected token type") /// cover: unreachable
 			return /// cover: unreachable
 		}
 	}
+	
+}
+
+func ParseSvgDocument(input io.Reader) (result Document, err error) {
+	decoder := xml.NewDecoder(input)
+	decoder.CharsetReader = charset.NewReaderLabel
+
+	result, err = DecodeSvgDocument(decoder, xmlDecoderToken)
+	if err != nil {
+		return
+	}
+
+	err = DecodeSvgBackmatter(&result, decoder, xmlDecoderToken)
+	return
 }
 
 

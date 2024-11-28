@@ -13,6 +13,8 @@ func TestParseTransformList(t *testing.T) {
 		{"scale(0.25,0.26), translate(15,16)", false, []Transform{
 			Transform{Name:"scale", Parameters: []float64{0.25,0.26}},
 			Transform{Name:"translate", Parameters: []float64{15,16}}}},
+		{"scale(0.25,0.26), translate(15,16), --", true, []Transform{}},
+		{"scale(0.25,---)", true, []Transform{}},
 		{"", false, []Transform(nil)},
 	}
 
@@ -35,7 +37,7 @@ func TestParseTransformList(t *testing.T) {
 		)
 		
 		if testCase.expectErr {
-			assert.NotNil(t, err)
+			assert.Error(t, err)
 		} else {
 			assert.Nil(t, err)
 			assert.Equal(t, testCase.expectResult, result)
@@ -59,6 +61,10 @@ func TestTransformApply(t *testing.T) {
 		{Transform{Name:"matrix",    Parameters: []float64{2,0,0,3,0,0}}, 4.0, 5.0, 8.0, 15.0,  0.0}, // scale, 2x and 3y
 		{Transform{Name:"matrix",    Parameters: []float64{1,0,0,1,1,2}}, 4.0, 5.0, 5.0,  7.0,  0.0}, // translate by x+1, y+2
 		{Transform{Name:"matrix",    Parameters: []float64{}},            4.0, 5.0, 4.0,  5.0,  0.0},
+		{Transform{Name:"rotate",    Parameters: []float64{}},         4,5,4,5,0},
+		{Transform{Name:"skewX",     Parameters: []float64{}},         4,5,4,5,0},
+		{Transform{Name:"skewY",     Parameters: []float64{}},         4,5,4,5,0},
+		{Transform{Name:"unknown",   Parameters: []float64{}},         4,5,4,5,0},
 	}
 
 	for _, testCase := range testCases {

@@ -6,10 +6,7 @@ import (
 )
 
 func DetectName() string {
-	executable, error := os.Executable()
-	if (error != nil) {
-		return "couldn't detect name"
-	}
-
+	executable, err := os.Executable()
+	PanicOnError(err)
 	return filepath.Base(executable)
 }

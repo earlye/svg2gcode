@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"encoding/xml"
 	"github.com/stretchr/testify/assert"
 	"log"
 	"testing"
@@ -29,3 +30,21 @@ func TestParseSvgString(t *testing.T) {
 	}
 }
 
+func TestDecodeSvgDocument(t *testing.T) {
+	brokenDecoderToken := func(decoder *xml.Decoder) (xml.Token, error) {
+		return xml.Directive{}, nil
+	}
+	decoder := xml.Decoder{}
+	_, err := DecodeSvgDocument(&decoder, brokenDecoderToken)
+	assert.Error(t, err)
+} 
+
+func TestDecodeSvgBackmatter(t *testing.T) {
+	brokenDecoderToken := func(decoder *xml.Decoder) (xml.Token, error) {
+		return xml.Directive{}, nil
+	}
+	decoder := xml.Decoder{}
+	document := Document{}
+	err := DecodeSvgBackmatter(&document, &decoder, brokenDecoderToken)
+	assert.Error(t, err)
+} 

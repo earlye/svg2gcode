@@ -38,7 +38,7 @@ func convertSvgElement(depth string, input svg.XmlElement, output io.Writer) {
 }
 
 func convertSvg(input io.Reader, output io.Writer) (err error) {
-	log.Printf("[DEBUG] input: %s output: %s\n", util.Name(input, "stdin"), util.Name(output, "stdout"))
+	log.Printf("[DEBUG] input: %s output: %s\n", util.FileName(input, "stdin"), util.FileName(output, "stdout"))
 	doc, err := svg.ParseSvgDocument(input)
 	if err != nil {
 		return
