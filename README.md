@@ -12,28 +12,28 @@ any sensible location. The sorts of information that will fit in the
 
 ## TODO:
 
-### DONE CLI framework for reading several svg files and writing to a single output
+* DONE CLI framework for reading several svg files and writing to a single output
 
-### DONE parse svg xml, tracking full element/attribute names
+* DONE parse svg xml, tracking full element/attribute names
 
-### TODO traverse svg element
+* TODO traverse svg element
 
-### TODO convert svg path data to gcode
+* TODO convert svg path data to gcode
 
-### TODO track transforms so gcode carves in correct place
+* TODO track transforms so gcode carves in correct place
 
-### TODO support tabs
+* TODO support tabs
 
-### TODO support ramping carve
+* TODO support ramping carve
 
-### TODO support pocket carves in "hatch" mode
+* TODO support pocket carves in "hatch" mode
 
-### TODO support pocket carves with arbitrary-angle hatch
+* TODO support pocket carves with arbitrary-angle hatch
 
-### TODO generate output commands
+* TODO generate output commands
 
 ## Similar Projects:
 
-### https://github.com/srwiley/oksvg/tree/master
+* https://github.com/srwiley/oksvg/tree/master
 
-### https://github.com/srwiley/rasterx
+* https://github.com/srwiley/rasterx
