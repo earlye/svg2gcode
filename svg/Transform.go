@@ -54,7 +54,7 @@ func rotate(x,y,cx,cy,deg float64) (tx, ty float64) {
 func skewX(x,y,deg float64) (tx,ty float64) {
 	a := radians(deg)
 	tx = x + math.Cos(a) * y
-	ty = y 
+	ty = y
 	return
 }
 
@@ -111,7 +111,7 @@ func (this Transform) Apply(x, y float64) (tx, ty float64) {
 			log.Printf("[WARN] Not enough parameters for rotate")
 			return
 		}
-		
+
 		deg = this.Parameters[0]
 
 		if len(this.Parameters) >= 3 {
@@ -125,19 +125,19 @@ func (this Transform) Apply(x, y float64) (tx, ty float64) {
 			log.Printf("[WARN] Not enough parameters for skewX")
 			return
 		}
-		
+
 		deg := this.Parameters[0]
 		return skewX(x,y, deg)
-		
+
 	case "skewY":
 		if len(this.Parameters) < 1 {
 			log.Printf("[WARN] Not enough parameters for skewY")
 			return
 		}
-		
+
 		deg := this.Parameters[0]
 		return skewY(x,y, deg)
-		
+
 	default:
 		log.Printf("[WARN] Unsupported transform '%s'\n", this.Name)
 		return
@@ -158,16 +158,16 @@ func ParseTransformList(input string) (result []Transform, err error) {
 		}
 
 		log.Printf("[INFO] ParseTransformList: remaining: '%s' match: '%#v'\n", remaining, match)
-		remaining = util.RemoveLeadingWhitespaceComma(remaining[len(match[0]):])
+		remaining = util.RemoveWhitespaceLeadingComma(remaining[len(match[0]):])
 		name := match[2]
 		parametersString := match[3]
 
 		var parameters []float64
 		parameters, err = ParseTransformParameters(parametersString)
 		if err != nil {
-			return 
+			return
 		}
-		
+
 		entry := Transform {Name: name, Parameters: parameters}
 		result = append(result, entry)
 	}
@@ -188,9 +188,8 @@ func ParseTransformParameters(input string) (result []float64, err error) {
 		var value float64
 		value, err = strconv.ParseFloat(match[1], 64)
 		util.PanicOnError(err)
-		remaining = util.RemoveLeadingWhitespaceComma(remaining[len(match[0]):])
+		remaining = util.RemoveWhitespaceLeadingComma(remaining[len(match[0]):])
 		result = append(result, value)
 	}
-	
-}
 
+}
