@@ -187,7 +187,9 @@ func ParseTransformParameters(input string) (result []float64, err error) {
 
 		var value float64
 		value, err = strconv.ParseFloat(match[1], 64)
-		util.PanicOnError(err)
+		if err != nil {
+			return
+		}
 		remaining = util.RemoveWhitespaceLeadingComma(remaining[len(match[0]):])
 		result = append(result, value)
 	}

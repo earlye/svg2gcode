@@ -27,7 +27,7 @@ func ParseViewBox(input string) (result ViewBox, err error) {
 	}
 	MinX, err := strconv.ParseFloat(match[1], 64);
 	util.PanicOnError(err)
-	
+
 	MinY, err := strconv.ParseFloat(match[7], 64)
 	util.PanicOnError(err)
 

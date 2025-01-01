@@ -18,5 +18,5 @@ func TestFileName(t *testing.T) {
 	assert.Equal(t, "FileName_test.go", name)
 
 	name = FileName("not-a-file", "foo")
-	assert.Equal(t, "FileName_test.go", name)
+	assert.Equal(t, "foo", name)
 }

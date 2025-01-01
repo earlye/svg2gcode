@@ -42,7 +42,7 @@ bin/svg2gcode: test $(GOFILES) go.mod Makefile
 	chmod +x "$(abspath $@)"
 
 run: bin/svg2gcode
-	bin/svg2gcode -v examples/x/x.svg | jq -M .
+	bin/svg2gcode examples/x/x.svg
 
 .coverage.html: .coverage.out 
 	go tool cover -html=.coverage.out -o $(abspath $@)
