@@ -7,18 +7,6 @@ import (
 	"io"
 )
 
-type GCodeWriter struct {
-	Writer io.Writer
-}
-
-func (this *GCodeWriter) Write(input string) {
-	this.Writer.Write([]byte(input))
-}
-
-func (this *GCodeWriter) Comment(input string) {
-	this.Write("; " + input)
-}
-
 type SvgxDocument struct {
 	Filename string
 	SvgDocument *svg.Document
@@ -42,9 +30,25 @@ func (this *SvgxDocument) MarshalYAML() (result interface{}, err error) {
 }
 
 func (this *SvgxDocument) Carve(output io.Writer) {
-	writer := GCodeWriter{
+	writer := &GCodeWriter{
 		Writer: output,
 	}
 	writer.Comment(fmt.Sprintf("Source: %s\n", this.Filename))
+	transform := []svg.Transform{svg.Transform{
+		Name: "scale",
+		Parameters: []float64{1,-1},
+	}}
 
+	if this.OriginMarker != nil {
+		writer.Comment(fmt.Sprintf("Origin: (%v,%v)\n", this.OriginMarker.Attribute("cx"), this.OriginMarker.Attribute("cy")))
+		transform = append(transform, svg.Transform{
+			Name: "translate",
+			Parameters: []float64{
+				-svg.MustParseNumber(this.OriginMarker.Attribute("cx")),
+				-svg.MustParseNumber(this.OriginMarker.Attribute("cy")),
+			},
+		})
+	}
+
+	this.Root.Carve(writer, transform)
 }

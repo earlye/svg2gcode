@@ -28,6 +28,14 @@ func ParseNumber(input string) (result float64, err error) {
 	return
 }
 
+func MustParseNumber(input string) (result float64) {
+	result, err := ParseNumber(input)
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
 var PopNumberRegexp = regexp.MustCompile("^([[:space:]]*(" + NumberPattern + ")).*")
 func PopNumber(input string) (result float64, remaining string, err error) {
 	match := PopNumberRegexp.FindStringSubmatch(input)
@@ -53,4 +61,3 @@ func PopNumber(input string) (result float64, remaining string, err error) {
 	result, err = strconv.ParseFloat(numberPart, 64)
 	return
 }
-

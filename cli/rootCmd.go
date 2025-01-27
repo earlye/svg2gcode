@@ -19,62 +19,7 @@ import (
 	_ "strings"
 )
 
-func LineToAbsolute(parameters []float64, gCodeDesc svgx.GCodeDesc, output io.Writer) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
-		return
-	}
-	for i := 0; i < len(parameters); i = i + 2 {
-		log.Printf("[DEBUG] LineToAbsolute (%f, %f)", parameters[i], parameters[i+1])
-	}
-}
-
-func MoveAbsolute(parameters []float64, gCodeDesc svgx.GCodeDesc, output io.Writer) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
-		return
-	}
-	log.Printf("[DEBUG] MoveAbsolute (%f,%f)", parameters[0], parameters[1])
-	LineToAbsolute(parameters[2:], gCodeDesc, output)
-}
-
-func LineToRelative(parameters []float64, gCodeDesc svgx.GCodeDesc, output io.Writer) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
-		return
-	}
-	for i := 0; i < len(parameters); i = i + 2 {
-		log.Printf("[DEBUG] LineToRelative (%f, %f)", parameters[i], parameters[i+1])
-	}
-}
-
-func MoveRelative(parameters []float64, gCodeDesc svgx.GCodeDesc, output io.Writer) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
-		return
-	}
-	log.Printf("[DEBUG] MoveRelative (%f,%f)", parameters[0], parameters[1])
-	LineToAbsolute(parameters[2:], gCodeDesc, output)
-}
-
-/* func loadSvgPath(input *svg.XmlElement, output io.Writer) {
-	defer logx.Indent(2)()
-
-	pathData := input.Attribute(xml.Name{Local:"d"})
-	log.Printf("[DEBUG] Path Data: %s\n", pathData)
-
-	pathCommands := svg.ParseSvgPathData(pathData)
-	gCodeDesc := input.GCodeDesc
-	log.Printf("[DEBUG] GCodeDesc: %#v\n", gCodeDesc)
-	for _, command := range(pathCommands) {
-		log.Printf("[DEBUG] %#v\n", command)
-		switch(command.Command) {
-		case "M": MoveAbsolute(command.Parameters, gCodeDesc, output)
-		case "m": MoveRelative(command.Parameters, gCodeDesc, output)
-		}
-	}
-	_ = pathCommands
-  } */
+/*  */
 
 func attachSvgDesc(input *svg.XmlElement, SvgxElement *svgx.SvgxElement) {
 	defer logx.Indent(2)()
@@ -122,6 +67,7 @@ func svgToSvgxElement(input *svg.XmlElement, output *svgx.SvgxElement) {
 			XmlElement: child,
 		}
 		svgToSvgxElement(child, svgxChild)
+		output.Children = append(output.Children, svgxChild)
 	}
 
 	log.Printf("[SILLY] </%s>\n", input.Name)

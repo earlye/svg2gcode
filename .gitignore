@@ -8,3 +8,5 @@
 bin
 .*
 
+*.gcode
+examples/earnest-labs.svg

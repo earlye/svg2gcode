@@ -137,11 +137,22 @@ func (this Transform) Apply(x, y float64) (tx, ty float64) {
 
 		deg := this.Parameters[0]
 		return skewY(x,y, deg)
-
+	case "": // identity
+		return
 	default:
 		log.Printf("[WARN] Unsupported transform '%s'\n", this.Name)
 		return
 	}
+}
+
+func ApplyTransformList(x, y float64, transforms []Transform) (tx, ty float64) {
+	tx = x
+	ty = y
+	// return
+	for _, transform := range transforms {
+		tx, ty = transform.Apply(tx, ty)
+	}
+	return
 }
 
 const TransformPattern = "(([[:alpha:]][[:alnum:]]*)\\(([^\\)]*)\\))"

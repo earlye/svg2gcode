@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
+
 <svg
    width="1in"
    height="1in"
@@ -26,12 +27,12 @@
      inkscape:document-units="mm"
      showgrid="false"
      inkscape:zoom="2.2713845"
-     inkscape:cx="-67.579928"
+     inkscape:cx="-68.460448"
      inkscape:cy="59.875376"
      inkscape:window-width="1728"
-     inkscape:window-height="1080"
+     inkscape:window-height="1052"
      inkscape:window-x="0"
-     inkscape:window-y="37"
+     inkscape:window-y="65"
      inkscape:window-maximized="0"
      inkscape:current-layer="X-Layer" />
   <g
@@ -50,22 +51,15 @@
        r="2">
       <desc
          id="desc642">origin-marker: true</desc>
-    </circle>
+    </circle> 
     <path
        style="vector-effect:non-scaling-stroke;fill:none;stroke:#000000;stroke-width:1.05833;stroke-dasharray:none;-inkscape-stroke:hairline"
-       d="M 0,0 25.4,25.4"
-       id="tl-br">
+       d="M 0,0 25.4,25.4 m 0 -25.4 -25.4 25.4"
+       id="tl-br"
+       more-d="m 0 -25.4 -25.4 25.4">
       <desc
-       id="desc3"># top-left =&gt; bottom-right
+         id="desc3"># top-left =&gt; bottom-right
 carve-depth: 0.1 mm</desc>
-    </path>
-    <path
-       id="tr-bl"
-       d="m 25.4 0 -25.4 25.4"
-       style="vector-effect:non-scaling-stroke;fill:none;stroke:#000000;stroke-width:1.05833;stroke-dasharray:none;-inkscape-stroke:hairline">
-      <desc
-         id="desc919"># top-right =&gt; bottom-left
-carve-depth: 0.1mm</desc>
     </path>
   </g>
 </svg>

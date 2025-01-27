@@ -6,6 +6,7 @@ PATH := $(PATH):$(HOME)/go/bin
 PACKAGE_DIRS:=$(filter-out ./, $(sort $(dir $(GOFILES))))
 DEPENDENCY_FILES:=$(patsubst %,%.dependencies,$(PACKAGE_DIRS))
 
+$(INFO entering directory `$(shell pwd)")
 
 all: bin/svg2gcode
 
@@ -41,8 +42,9 @@ bin/svg2gcode: test $(GOFILES) go.mod Makefile
 	test -f "$(abspath $@)"
 	chmod +x "$(abspath $@)"
 
-run: bin/svg2gcode
-	bin/svg2gcode examples/x/x.svg
+examples/%.gcode : examples/%.svg bin/svg2gcode
+	bin/svg2gcode $< > $@
+	cat $@
 
 .coverage.html: .coverage.out 
 	go tool cover -html=.coverage.out -o $(abspath $@)
