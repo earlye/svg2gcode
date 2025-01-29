@@ -16,11 +16,42 @@ any sensible location. The sorts of information that will fit in the
 
 * DONE parse svg xml, tracking full element/attribute names
 
-* TODO traverse svg element
+* DONE traverse svg element
 
-* TODO convert svg path data to gcode
+* DONE convert svg path data to gcode
 
-* TODO track transforms so gcode carves in correct place
+* DONE track transforms so gcode carves in correct place
+
+* TODO support <circle>
+
+
+* TODO support <clipPath>
+
+* TODO support <defs> and <use>
+
+* TODO support <ellipse>
+
+* TODO support <line>
+
+* TODO support <pattern>
+
+* TODO support <polygon>
+
+* TODO support <polyline>
+
+* TODO support <rect>
+
+* TODO support <symbol>
+
+* TODO support <text>
+
+* TODO support <textPath>
+
+* TODO support <tspan>
+
+* TODO support <unknown> (maybe just log and fail?)
+
+* TODO support <view>
 
 * TODO support tabs
 
