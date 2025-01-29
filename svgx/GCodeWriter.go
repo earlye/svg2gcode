@@ -72,7 +72,7 @@ func (this *GCodeWriter) LineAbsolute(x,y,z float64) {
 	this.Y = y
 	this.Z = z
 	tx, ty := svg.ApplyTransformList(this.X, this.Y, this.Transforms)
-	this.Write(fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (line-absolute: %f,%f,%f)\n",
+	this.Write(fmt.Sprintf("G1 F1000 X%f Y%f Z%f; (line-absolute: %f,%f,%f)\n",
 		tx, ty, this.Z,
 		x, y, z))
 }
@@ -83,7 +83,7 @@ func (this *GCodeWriter) LineRelative(x,y,z float64) {
 	this.Y = this.Y + y
 	this.Z = this.Z + z
 	tx, ty := svg.ApplyTransformList(this.X, this.Y, this.Transforms)
-	this.Write(fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (line-relative: %f,%f,%f)\n",
+	this.Write(fmt.Sprintf("G1 F1000 X%f Y%f Z%f; (line-relative: %f,%f,%f)\n",
 		tx, ty, this.Z,
 		x, y, z))
 }

@@ -179,8 +179,8 @@ func ParseTransformList(input string) (result []Transform, err error) {
 			return
 		}
 
-		entry := Transform {Name: name, Parameters: parameters}
-		result = append(result, entry)
+		entry := []Transform{ {Name: name, Parameters: parameters} }
+		result = append(entry, result...) // we want the list in reverse order
 	}
 }
 

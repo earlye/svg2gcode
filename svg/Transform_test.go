@@ -11,8 +11,9 @@ import (
 func TestParseTransformList(t *testing.T) {
 	var testCases = []struct{input string; expectErr bool; expectResult []Transform} {
 		{"scale(0.25,0.26), translate(15,16)", false, []Transform{
+			Transform{Name:"translate", Parameters: []float64{15,16}},
 			Transform{Name:"scale", Parameters: []float64{0.25,0.26}},
-			Transform{Name:"translate", Parameters: []float64{15,16}}}},
+		}},
 		{"scale(0.25,0.26), translate(15,16), --", true, []Transform{}},
 		{"scale(0.25,---)", true, []Transform{}},
 		{"", false, []Transform(nil)},
@@ -35,7 +36,7 @@ func TestParseTransformList(t *testing.T) {
 			testCase.expectErr,
 			err,
 		)
-		
+
 		if testCase.expectErr {
 			assert.Error(t, err)
 		} else {
