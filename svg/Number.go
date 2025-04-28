@@ -36,6 +36,15 @@ func MustParseNumber(input string) (result float64) {
 	return
 }
 
+func ParseNumberDefault(input string, defaultResult float64) (result float64) {
+	result, err := ParseNumber(input)
+	if err != nil {
+		result = defaultResult
+	}
+	return
+}
+
+
 var PopNumberRegexp = regexp.MustCompile("^([[:space:]]*(" + NumberPattern + ")).*")
 func PopNumber(input string) (result float64, remaining string, err error) {
 	match := PopNumberRegexp.FindStringSubmatch(input)

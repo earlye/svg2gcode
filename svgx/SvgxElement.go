@@ -2,9 +2,11 @@ package svgx
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"svg2gcode/logx"
 	"svg2gcode/svg"
+	"strings"
 )
 
 type SvgxElement struct {
@@ -28,7 +30,7 @@ func LineToAbsolute(parameters []float64, writer *GCodeWriter) {
 	for ;len(parameters) >= 2; {
 		x := parameters[0]
 		y := parameters[1]
-		writer.LineAbsolute(x,y,0)
+		writer.LineAbsolute(x,y)
 		parameters=parameters[2:]
 	}
 }
@@ -40,7 +42,7 @@ func MoveAbsolute(parameters []float64, writer *GCodeWriter) {
 	}
 	x := parameters[0]
 	y := parameters[1]
-	writer.MoveAbsolute(x, y, 0)
+	writer.MoveAbsolute(x, y)
 	LineToAbsolute(parameters[2:], writer)
 }
 
@@ -49,7 +51,7 @@ func LineToRelative(parameters []float64, writer *GCodeWriter) {
 	for ;len(parameters) >= 2; {
 		x := parameters[0]
 		y := parameters[1]
-		writer.LineRelative(x,y,0)
+		writer.LineRelative(x,y)
 		parameters = parameters[2:]
 	}
 }
@@ -61,7 +63,7 @@ func MoveRelative(parameters []float64, writer *GCodeWriter) {
 	}
 	x := parameters[0]
 	y := parameters[1]
-	writer.MoveRelative(x, y, 0)
+	writer.MoveRelative(x, y)
 	LineToRelative(parameters[2:], writer)
 }
 
@@ -164,7 +166,7 @@ func EllipticArcAbsolute(parameters []float64, writer *GCodeWriter) {
 				v = ry * math.Sin(theta)
 				x := math.Cos(phi)*u - math.Sin(phi) * v + cx
 				y := math.Sin(phi)*u + math.Cos(phi) * v + cy
-				writer.LineAbsolute(x,y,0)
+				writer.LineAbsolute(x,y)
 			}
 		} else {
 			for theta := theta1; theta > theta2; theta = theta - DegreesToRadians(10.0) {
@@ -175,11 +177,11 @@ func EllipticArcAbsolute(parameters []float64, writer *GCodeWriter) {
 				v = ry * math.Sin(theta)
 				x := math.Cos(phi)*u - math.Sin(phi) * v + cx
 				y := math.Sin(phi)*u + math.Cos(phi) * v + cy
-				writer.LineAbsolute(x,y,0)
+				writer.LineAbsolute(x,y)
 			}
 		}
 
-		writer.LineAbsolute(x2,y2,0)
+		writer.LineAbsolute(x2,y2)
 		parameters = parameters[7:]
 	}
 }
@@ -458,19 +460,49 @@ func VerticalRelative(parameters []float64, writer *GCodeWriter) {
 	}
 }
 
+func carveSvgCircle(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.Transform) {
+	defer logx.Indent(2)()
 
-func carveSvgPath(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.Transform)  {
+	cxStr := input.AttributeDefault("cx","0")
+	cyStr := input.AttributeDefault("cy","0")
+	rxStr := input.AttributeDefault("rx","auto")
+	ryStr := input.AttributeDefault("ry","auto")
+
+	if strings.HasSuffix(cxStr, "%") || strings.HasSuffix(cyStr, "%") ||
+		strings.HasSuffix(rxStr, "%") || strings.HasSuffix(ryStr, "%") {
+		log.Printf("ERROR: percentages not yet supported.")
+		return
+	}
+
+	cx := svg.MustParseNumber(cxStr)
+	cy := svg.MustParseNumber(cyStr)
+	rx := svg.MustParseNumber(rxStr)
+	ry := svg.MustParseNumber(ryStr)
+
+	pathData := fmt.Sprintf("M %f %f A %f %f A %f %f A %f %f A %f %f",
+		cx+rx,cy,
+		cx,cy+ry,
+		cx-rx,cy,
+		cx,cy-ry,
+		cx+rx,cy)
+	carveSvgPathData(pathData, writer, transforms)
+}
+
+func carveSvgPath(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.Transform) {
 	defer logx.Indent(2)()
 
 	pathData := input.Attribute("d")
+	carveSvgPathData(pathData, writer, transforms)
+}
+
+func carveSvgPathData(pathData string, writer *GCodeWriter, transforms []svg.Transform) {
 	writer.Comment(fmt.Sprintf("-- Carving path Data: %s\n", pathData))
 	writer.SetTransforms(transforms)
 	writer.X = 0
 	writer.Y = 0
-	writer.Z = 0
 	writer.StartX = 0
 	writer.StartY = 0
-	writer.StartZ = 0
+	writer.CommentCurrentXY("  Carving path data 0,0 is")
 
 	pathCommands := svg.ParseSvgPathData(pathData)
 	for _, command := range(pathCommands) {
@@ -498,7 +530,7 @@ func carveSvgPath(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.T
 		case "z": Close(writer)
 		}
 	}
-	_ = pathCommands
+	writer.LiftToSafeHeight()
 }
 
 func (this *SvgxElement) Carve(writer *GCodeWriter, transforms []svg.Transform) {
@@ -525,9 +557,20 @@ func (this *SvgxElement) Carve(writer *GCodeWriter, transforms []svg.Transform) 
 	}
 
 	if gcodeDesc != nil && gcodeDesc.CarveDepth != "" {
-		writer.Comment(fmt.Sprintf("-- Need to carve to depth: %s\n", gcodeDesc.CarveDepth))
-		switch this.XmlElement.Name {
-		case "http://www.w3.org/2000/svg:path": carveSvgPath(this.XmlElement, writer, transforms)
+		writer.GCodeDesc = gcodeDesc
+		writer.LiftToSafeHeight()
+		writer.CurrentDepth = 0
+		carveDepth := svg.MustParseNumber(gcodeDesc.CarveDepth)
+		for ;writer.CurrentDepth < carveDepth; {
+			writer.CurrentDepth = writer.CurrentDepth + 1 // TODO use carve increment instead.
+			if writer.CurrentDepth > carveDepth {
+				writer.CurrentDepth = carveDepth
+			}
+			writer.Comment(fmt.Sprintf("-- CurrentDepth: %f CarveDepth: %f\n", writer.CurrentDepth, carveDepth))
+			switch this.XmlElement.Name {
+			case "http://www.w3.org/2000/svg:path": carveSvgPath(this.XmlElement, writer, transforms)
+			case "http://www.w3.org/2000/svg:circle": carveSvgCircle(this.XmlElement, writer, transforms)
+			}
 		}
 	}
 

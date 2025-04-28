@@ -22,6 +22,15 @@ func (this *XmlElement) Attribute(name string) (result string) {
 	return
 }
 
+func (this *XmlElement) AttributeDefault(name, defaultValue string) (result string) {
+	result = ""
+	result, ok := this.Attributes[name]
+	if !ok {
+		result = defaultValue
+	}
+	return
+}
+
 func (this *XmlElement) String() (result string) {
 	result = fmt.Sprintf("<%s>", this.Name)
 	return
