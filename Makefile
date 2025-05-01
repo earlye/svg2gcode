@@ -5,6 +5,7 @@ VERTAG=-$(shell git rev-parse --short HEAD || echo "0000000")
 PATH := $(PATH):$(HOME)/go/bin
 PACKAGE_DIRS:=$(filter-out ./, $(sort $(dir $(GOFILES))))
 DEPENDENCY_FILES:=$(patsubst %,%.dependencies,$(PACKAGE_DIRS))
+SHELL=/bin/bash -euo pipefail
 
 $(info Entering directory `$(shell pwd)') # '`
 

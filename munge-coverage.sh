@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+set -euo pipefail
 
 ALL_FILES=$(find . -name "*.go")
 IGNORE_FILES=$(grep -l "/// coverage-ignore" ${ALL_FILES})
