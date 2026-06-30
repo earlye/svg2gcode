@@ -4,80 +4,165 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"svg2gcode/logx"
 	"svg2gcode/svg"
-	"strings"
 )
 
 type SvgxElement struct {
-	GCodeDesc *GCodeDesc
-	Document *SvgxDocument `yaml:"omit"`
-	Parent *SvgxElement `yaml:"omit"`
-	XmlElement *svg.XmlElement `yaml:"omit"`
-	Children []*SvgxElement
+	GCodeDesc     *GCodeDesc
+	EffectiveDesc *GCodeDesc `yaml:"omit"`
+	Document      *SvgxDocument  `yaml:"omit"`
+	Parent        *SvgxElement   `yaml:"omit"`
+	XmlElement    *svg.XmlElement `yaml:"omit"`
+	Children      []*SvgxElement
 }
 
 func (this *SvgxElement) MarshalYAML() (result interface{}, err error) {
 	result = map[string]interface{}{
-		"GCodeDesc": this.GCodeDesc,
+		"GCodeDesc":  this.GCodeDesc,
 		"XmlElement": this.XmlElement,
 	}
 	return
 }
 
-func LineToAbsolute(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-	for ;len(parameters) >= 2; {
-		x := parameters[0]
-		y := parameters[1]
-		writer.LineAbsolute(x,y)
-		parameters=parameters[2:]
-	}
-}
+// --- pure helpers ---
 
-func MoveAbsolute(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
+func useAbsoluteLines(ctx CarveCtx) (lines []string, out CarveCtx) {
+	out = ctx
+	if out.UsingAbsolute {
 		return
 	}
-	x := parameters[0]
-	y := parameters[1]
-	writer.MoveAbsolute(x, y)
-	LineToAbsolute(parameters[2:], writer)
+	lines = append(lines, "G90 ; Use absolute positioning.\n")
+	out.UsingAbsolute = true
+	return
 }
 
-func LineToRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-	for ;len(parameters) >= 2; {
-		x := parameters[0]
-		y := parameters[1]
-		writer.LineRelative(x,y)
-		parameters = parameters[2:]
-	}
-}
-
-func MoveRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-	if len(parameters) < 2 {
+func liftToSafeHeightLines(ctx CarveCtx) (lines []string, out CarveCtx) {
+	out = ctx
+	if out.Z == out.SafeHeight {
 		return
 	}
-	x := parameters[0]
-	y := parameters[1]
-	writer.MoveRelative(x, y)
-	LineToRelative(parameters[2:], writer)
+	tx, ty := svg.ApplyTransformList(out.X, out.Y, out.Transforms)
+	tx *= out.MmPerUnit
+	ty *= out.MmPerUnit
+	lines = append(lines, fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (lift tosafe-height)\n", tx, ty, out.SafeHeight))
+	out.Z = out.SafeHeight
+	return
+}
+
+func lineAbsoluteLines(x, y float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	out = ctx
+	var absLines []string
+	absLines, out = useAbsoluteLines(out)
+	lines = append(lines, absLines...)
+	out.X, out.Y = x, y
+	tx, ty := svg.ApplyTransformList(x, y, out.Transforms)
+	tx *= out.MmPerUnit
+	ty *= out.MmPerUnit
+	lines = append(lines, fmt.Sprintf("G1 F1000 X%f Y%f Z%f; (line-absolute: %f,%f)\n",
+		tx, ty, out.Depth, x, y))
+	out.Z = out.Depth
+	return
+}
+
+// --- path handlers (pure functions, Candidates 2 & 3) ---
+
+func LineToAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+	for len(params) >= 2 {
+		var l []string
+		l, out = lineAbsoluteLines(params[0], params[1], out)
+		lines = append(lines, l...)
+		params = params[2:]
+	}
+	return
+}
+
+func MoveAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+	if len(params) < 2 {
+		return
+	}
+	x, y := params[0], params[1]
+	var l []string
+	l, out = useAbsoluteLines(out)
+	lines = append(lines, l...)
+	l, out = liftToSafeHeightLines(out)
+	lines = append(lines, l...)
+	out.X, out.Y = x, y
+	out.StartX, out.StartY = x, y
+	tx, ty := svg.ApplyTransformList(x, y, out.Transforms)
+	tx *= out.MmPerUnit
+	ty *= out.MmPerUnit
+	lines = append(lines,
+		fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (move-absolute: %f[%f],%f[%f] - safe-height)\n",
+			tx, ty, out.SafeHeight, out.X, x, out.Y, y),
+		fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (move-absolute: %f[%f],%f[%f])\n",
+			tx, ty, out.Depth, out.X, x, out.Y, y),
+	)
+	out.Z = out.Depth
+	l, out = LineToAbsolute(params[2:], out)
+	lines = append(lines, l...)
+	return
+}
+
+func LineToRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+	for len(params) >= 2 {
+		var l []string
+		l, out = lineAbsoluteLines(out.X+params[0], out.Y+params[1], out)
+		lines = append(lines, l...)
+		params = params[2:]
+	}
+	return
+}
+
+func MoveRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+	if len(params) < 2 {
+		return
+	}
+	dx, dy := params[0], params[1]
+	var l []string
+	l, out = useAbsoluteLines(out)
+	lines = append(lines, l...)
+	l, out = liftToSafeHeightLines(out)
+	lines = append(lines, l...)
+	out.X = out.X + dx
+	out.Y = out.Y + dy
+	out.StartX = out.X
+	out.StartY = out.Y
+	tx, ty := svg.ApplyTransformList(out.X, out.Y, out.Transforms)
+	tx *= out.MmPerUnit
+	ty *= out.MmPerUnit
+	lines = append(lines,
+		fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (move-relative: %f,%f - safe-height)\n",
+			tx, ty, out.SafeHeight, dx, dy),
+		fmt.Sprintf("G0 F1000 X%f Y%f Z%f; (move-relative: %f,%f)\n",
+			tx, ty, out.Depth, dx, dy),
+	)
+	out.Z = out.Depth
+	l, out = LineToRelative(params[2:], out)
+	lines = append(lines, l...)
+	return
 }
 
 func DegreesToRadians(input float64) float64 {
-	return input / 180 * math.Pi;
+	return input / 180 * math.Pi
 }
 
-func AngleRadians(uX,uY,vX,vY float64) float64 {
+func AngleRadians(uX, uY, vX, vY float64) float64 {
 	// Eq 5.4 https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes
-	dotProduct := uX * vX + uY * vY
+	dotProduct := uX*vX + uY*vY
 	magU := math.Sqrt(uX*uX + uY*uY)
 	magV := math.Sqrt(uX*uX + uY*uY)
 
-	sign := uX * vY - uY * vX
+	sign := uX*vY - uY*vX
 	if sign < 0 {
 		sign = -1
 	} else {
@@ -87,36 +172,32 @@ func AngleRadians(uX,uY,vX,vY float64) float64 {
 	return sign * math.Acos(dotProduct/(magU*magV))
 }
 
-func EllipticArcAbsolute(parameters []float64, writer *GCodeWriter) {
+func EllipticArcAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 7; {
-		x1 := writer.X
-		y1 := writer.Y
-		rx := parameters[0]
-		ry := parameters[1]
-		xAxisRotation := parameters[2] // degrees (aka "phi")
-		largeArcFlag := parameters[3] // 1 or 0
-		sweepFlag := parameters[4] // 1 or 0
-		x2 := parameters[5]
-		y2 := parameters[6]
+	for len(params) >= 7 {
+		x1 := out.X
+		y1 := out.Y
+		rx := params[0]
+		ry := params[1]
+		xAxisRotation := params[2]
+		largeArcFlag := params[3]
+		sweepFlag := params[4]
+		x2 := params[5]
+		y2 := params[6]
 
 		phi := DegreesToRadians(xAxisRotation)
 		fA := largeArcFlag
 		fS := sweepFlag
 
-		// Eq 5.1 https://www.w3.org/TR/SVG/implnote.html#ArcImplementationNotes
-		// x1'  = | cos(phi) -sin(phi) |  * | (x1-x2)/2 |
-		// y1'    | sin(phi) cos(phi)  |    | (y1-y2)/2 |
-		u := (x1-x2)/2
-		v := (y1-y2)/2
-		x1Prime := math.Cos(phi) * u - math.Sin(phi) * v
-		y1Prime := math.Sin(phi) * u + math.Cos(phi) * v
+		// Eq 5.1
+		u := (x1 - x2) / 2
+		v := (y1 - y2) / 2
+		x1Prime := math.Cos(phi)*u - math.Sin(phi)*v
+		y1Prime := math.Sin(phi)*u + math.Cos(phi)*v
 
 		// Eq 5.2
-		// sign = fA != fS ? +1 : -1
-		// cx' = sign*Sqrt( (rx^2*ry^2 - rx^2*y1Prime^2 - ry^2*x1Prime^2) / (rx^2*y1Prime^2 + ry^2*x1Prime^2) ) * |  rx*y1Prime/ry |
-		// cy'                                                                                                    | -ry*x1Prime/rx |
 		coeff := math.Sqrt((rx*rx*ry*ry - rx*rx*y1Prime*y1Prime - ry*ry*x1Prime*x1Prime) / (rx*rx*y1Prime*y1Prime + ry*ry*x1Prime*x1Prime))
 		if fA == fS {
 			coeff = -coeff
@@ -125,348 +206,342 @@ func EllipticArcAbsolute(parameters []float64, writer *GCodeWriter) {
 		cyPrime := coeff * (-ry * x1Prime / rx)
 
 		// Eq 5.3
-		// | cx | = | cos(phi) -sin(phi) | * | cxPrime | + | (x1+x2)/2 |
-		// | cy |   | sin(phi)  cos(phi) |   | cyPrime |   | (y1+y2)/2 |
-		u = (x1 + x2)/2
-		v = (y1 + y2)/2
-		cx := math.Cos(phi) * cxPrime - math.Sin(phi) * cyPrime + (x1+x2)/2
-		cy := math.Sin(phi) * cxPrime + math.Cos(phi) * cyPrime + (y1+y2)/2
-
+		u = (x1 + x2) / 2
+		v = (y1 + y2) / 2
+		cx := math.Cos(phi)*cxPrime - math.Sin(phi)*cyPrime + (x1+x2)/2
+		cy := math.Sin(phi)*cxPrime + math.Cos(phi)*cyPrime + (y1+y2)/2
 
 		// Eq 5.5
-		v1 := (x1Prime - cxPrime)/rx
-		v2 := (y1Prime - cyPrime)/ry
-		theta1 := AngleRadians(1,0, v1 , v2)
+		v1 := (x1Prime - cxPrime) / rx
+		v2 := (y1Prime - cyPrime) / ry
+		theta1 := AngleRadians(1, 0, v1, v2)
 		// Eq 5.6
-		deltaTheta := AngleRadians(v1,v2, (-x1Prime -cxPrime)/rx, (-y1Prime - cyPrime)/ry)
-		for ; deltaTheta > 2.0 * math.Pi ; {
-			deltaTheta = deltaTheta - 2.0 * math.Pi
+		deltaTheta := AngleRadians(v1, v2, (-x1Prime-cxPrime)/rx, (-y1Prime-cyPrime)/ry)
+		for deltaTheta > 2.0*math.Pi {
+			deltaTheta = deltaTheta - 2.0*math.Pi
 		}
-		for ; deltaTheta < -(2.0 * math.Pi) ; {
-			deltaTheta = deltaTheta + 2.0 * math.Pi
+		for deltaTheta < -(2.0 * math.Pi) {
+			deltaTheta = deltaTheta + 2.0*math.Pi
 		}
 		if sweepFlag == 0 && deltaTheta > 0 {
-			deltaTheta = deltaTheta - 2.0 * math.Pi
+			deltaTheta = deltaTheta - 2.0*math.Pi
 		}
 		if sweepFlag == 1 && deltaTheta < 0 {
-			deltaTheta = deltaTheta + 2.0 * math.Pi
+			deltaTheta = deltaTheta + 2.0*math.Pi
 		}
 
-		// TODO: Eq 6.1
-		// TODO: Eq 6.2
-		// TODO: Eq 6.3
-
-		theta2 := theta1 + deltaTheta
-		if theta1 < theta2 {
-			for theta := theta1; theta < theta2; theta = theta + DegreesToRadians(10.0) {
-				// Eq 3.1
-				// | x | = | cos(phi) -sin(phi) | * | rx * cos(theta) | + | cx |
-				// | y |   | sin(phi)  cos(phi) |   | ry * sin(theta) | + | cy |
-				u = rx * math.Cos(theta)
-				v = ry * math.Sin(theta)
-				x := math.Cos(phi)*u - math.Sin(phi) * v + cx
-				y := math.Sin(phi)*u + math.Cos(phi) * v + cy
-				writer.LineAbsolute(x,y)
-			}
-		} else {
-			for theta := theta1; theta > theta2; theta = theta - DegreesToRadians(10.0) {
-				// Eq 3.1
-				// | x | = | cos(phi) -sin(phi) | * | rx * cos(theta) | + | cx |
-				// | y |   | sin(phi)  cos(phi) |   | ry * sin(theta) | + | cy |
-				u = rx * math.Cos(theta)
-				v = ry * math.Sin(theta)
-				x := math.Cos(phi)*u - math.Sin(phi) * v + cx
-				y := math.Sin(phi)*u + math.Cos(phi) * v + cy
-				writer.LineAbsolute(x,y)
-			}
+		steps := int(math.Ceil(math.Abs(deltaTheta) / DegreesToRadians(10.0)))
+		if steps < 1 {
+			steps = 1
 		}
-
-		writer.LineAbsolute(x2,y2)
-		parameters = parameters[7:]
-	}
-}
-
-
-func EllipticArcRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 7; {
-		rx := parameters[0]
-		ry := parameters[1]
-		xAxisRotation := parameters[2] // degrees
-		largeArcFlag := parameters[3] // 1 or 0
-		sweepFlag := parameters[4] // 1 or 0
-		x := writer.X + parameters[5]
-		y := writer.Y + parameters[6]
-
-		EllipticArcAbsolute([]float64{rx,ry,xAxisRotation,largeArcFlag,sweepFlag,x,y},writer)
-
-		parameters = parameters[7:]
-	}
-}
-
-func Close(writer *GCodeWriter) {
-	LineToAbsolute([]float64{writer.StartX, writer.StartY}, writer)
-}
-
-func Interpolate(start, end, t float64) float64{
-	return start + t * (end - start)
-}
-
-func CubicBezierCurveAbsolute(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 6; {
-		x0 := writer.X; _ = x0
-		y0 := writer.Y; _ = y0
-		x1 := parameters[0]
-		y1 := parameters[1]
-		x2 := parameters[2]
-		y2 := parameters[3]
-		x3 := parameters[4]
-		y3 := parameters[5]
-
-		// TODO: do the parameterized bezier lerp-ception thing.
-		for t := 0.0; t < 1.0; t = t + 0.1 {
-			xA := Interpolate(x0, x1, t)
-			yA := Interpolate(y0, y1, t)
-			xB := Interpolate(x1, x2, t)
-			yB := Interpolate(y1, y2, t)
-			xC := Interpolate(x2, x3, t)
-			yC := Interpolate(y2, y3, t)
-
-			xAB := Interpolate(xA, xB, t)
-			yAB := Interpolate(yA, yB, t)
-			xBC := Interpolate(xB, xC, t)
-			yBC := Interpolate(yB, yC, t)
-
-			x := Interpolate(xAB, xBC, t)
-			y := Interpolate(yAB, yBC, t)
-
-			LineToAbsolute([]float64{x,y},writer)
+		var l []string
+		for i := 0; i < steps; i++ {
+			theta := theta1 + float64(i)/float64(steps)*deltaTheta
+			u = rx * math.Cos(theta)
+			v = ry * math.Sin(theta)
+			x := math.Cos(phi)*u - math.Sin(phi)*v + cx
+			y := math.Sin(phi)*u + math.Cos(phi)*v + cy
+			l, out = lineAbsoluteLines(x, y, out)
+			lines = append(lines, l...)
 		}
-		LineToAbsolute([]float64{x3,y3},writer)
-
-		parameters = parameters[6:]
+		l, out = lineAbsoluteLines(x2, y2, out)
+		lines = append(lines, l...)
+		params = params[7:]
 	}
+	return
 }
 
-func CubicBezierCurveRelative(parameters []float64, writer *GCodeWriter) {
+func EllipticArcRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 6; {
-		x0 := writer.X; _ = x0
-		y0 := writer.Y; _ = y0
-		x1 := writer.X + parameters[0]
-		y1 := writer.Y + parameters[1]
-		x2 := writer.X + parameters[2]
-		y2 := writer.Y + parameters[3]
-		x3 := writer.X + parameters[4]
-		y3 := writer.Y + parameters[5]
+	for len(params) >= 7 {
+		rx := params[0]
+		ry := params[1]
+		xAxisRotation := params[2]
+		largeArcFlag := params[3]
+		sweepFlag := params[4]
+		x := out.X + params[5]
+		y := out.Y + params[6]
 
-		// TODO: do the parameterized bezier lerp-ception thing.
-		for t := 0.0; t < 1.0; t = t + 0.1 {
-			xA := Interpolate(x0, x1, t)
-			yA := Interpolate(y0, y1, t)
-			xB := Interpolate(x1, x2, t)
-			yB := Interpolate(y1, y2, t)
-			xC := Interpolate(x2, x3, t)
-			yC := Interpolate(y2, y3, t)
-
-			xAB := Interpolate(xA, xB, t)
-			yAB := Interpolate(yA, yB, t)
-			xBC := Interpolate(xB, xC, t)
-			yBC := Interpolate(yB, yC, t)
-
-			x := Interpolate(xAB, xBC, t)
-			y := Interpolate(yAB, yBC, t)
-
-			LineToAbsolute([]float64{x,y},writer)
-		}
-		LineToAbsolute([]float64{x3,y3},writer)
-
-		parameters = parameters[6:]
+		var l []string
+		l, out = EllipticArcAbsolute([]float64{rx, ry, xAxisRotation, largeArcFlag, sweepFlag, x, y}, out)
+		lines = append(lines, l...)
+		params = params[7:]
 	}
+	return
 }
 
-
-func CubicBezierSmoothCurveAbsolute(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 4; {
-		x1 := parameters[0]
-		y1 := parameters[1]
-		x := parameters[2]
-		y := parameters[3]
-
-		// TODO: do the parameterized bezier lerp-ception thing.
-		LineToAbsolute([]float64{x1,y1},writer)
-		LineToAbsolute([]float64{x,y},writer)
-
-		parameters = parameters[4:]
-	}
+func Close(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	return LineToAbsolute([]float64{ctx.StartX, ctx.StartY}, ctx)
 }
 
-func CubicBezierSmoothCurveRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 4; {
-		dx1 := writer.X + parameters[0];
-		dy1 := writer.Y + parameters[1];
-		dx := writer.X + parameters[2];
-		dy := writer.Y + parameters[3];
-
-		// TODO: do the parameterized bezier lerp-ception thing.
-		LineToAbsolute([]float64{dx1,dy1},writer)
-		LineToAbsolute([]float64{dx,dy},writer)
-
-		parameters = parameters[4:]
-	}
+func Interpolate(start, end, t float64) float64 {
+	return start + t*(end-start)
 }
 
-func HorizontalAbsolute(parameters []float64, writer *GCodeWriter) {
+func CubicBezierCurveAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 1; {
-		x := parameters[0]
-		y := writer.Y
-
-		LineToAbsolute([]float64{x,y},writer)
-
-		parameters = parameters[1:]
-	}
-}
-
-func HorizontalRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 1; {
-		x := writer.X + parameters[0]
-		y := writer.Y
-
-		LineToAbsolute([]float64{x,y},writer)
-		parameters = parameters[1:]
-	}
-}
-
-func QuadraticBezierCurveAbsolute(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 4; {
-		x0 := writer.X; _ = x0
-		y0 := writer.Y; _ = y0
-		x1 := parameters[0]
-		y1 := parameters[1]
-		x2 := parameters[2]
-		y2 := parameters[3]
-
-		// TODO: do the parameterized bezier lerp-ception thing.
-		for t := 0.0; t < 1.0; t = t + 0.1 {
-			xA := Interpolate(x0, x1, t)
-			yA := Interpolate(y0, y1, t)
-			xB := Interpolate(x1, x2, t)
-			yB := Interpolate(y1, y2, t)
-
-			x := Interpolate(xA, xB, t)
-			y := Interpolate(yA, yB, t)
-
-			LineToAbsolute([]float64{x,y}, writer)
-		}
-		LineToAbsolute([]float64{x2,y2},writer)
-
-		parameters = parameters[4:]
-	}
-}
-
-func QuadraticBezierCurveRelative(parameters []float64, writer *GCodeWriter) {
-	defer logx.Indent(2)()
-
-	for ;len(parameters) >= 4; {
-		x0 := writer.X
-		y0 := writer.Y
-		x1 := writer.X + parameters[0];
-		y1 := writer.Y + parameters[1];
-		x2 := writer.X + parameters[2];
-		y2 := writer.Y + parameters[3];
+	for len(params) >= 6 {
+		x0, y0 := out.X, out.Y
+		x1 := params[0]; y1 := params[1]
+		x2 := params[2]; y2 := params[3]
+		x3 := params[4]; y3 := params[5]
 
 		for t := 0.0; t < 1.0; t = t + 0.1 {
-			xA := Interpolate(x0, x1, t)
-			yA := Interpolate(y0, y1, t)
-			xB := Interpolate(x1, x2, t)
-			yB := Interpolate(y1, y2, t)
-
-			x := Interpolate(xA, xB, t)
-			y := Interpolate(yA, yB, t)
-
-			LineToAbsolute([]float64{x,y}, writer)
+			xA := Interpolate(x0, x1, t); yA := Interpolate(y0, y1, t)
+			xB := Interpolate(x1, x2, t); yB := Interpolate(y1, y2, t)
+			xC := Interpolate(x2, x3, t); yC := Interpolate(y2, y3, t)
+			xAB := Interpolate(xA, xB, t); yAB := Interpolate(yA, yB, t)
+			xBC := Interpolate(xB, xC, t); yBC := Interpolate(yB, yC, t)
+			x := Interpolate(xAB, xBC, t); y := Interpolate(yAB, yBC, t)
+			var l []string
+			l, out = lineAbsoluteLines(x, y, out)
+			lines = append(lines, l...)
 		}
-		LineToAbsolute([]float64{x2,y2},writer)
-
-		parameters = parameters[4:]
+		var l []string
+		l, out = lineAbsoluteLines(x3, y3, out)
+		lines = append(lines, l...)
+		params = params[6:]
 	}
+	return
 }
 
-
-func QuadraticBezierSmoothCurveAbsolute(parameters []float64, writer *GCodeWriter) {
+func CubicBezierCurveRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 2; {
-		x1 := parameters[0]
-		y1 := parameters[1]
+	for len(params) >= 6 {
+		x0, y0 := out.X, out.Y
+		x1 := out.X + params[0]; y1 := out.Y + params[1]
+		x2 := out.X + params[2]; y2 := out.Y + params[3]
+		x3 := out.X + params[4]; y3 := out.Y + params[5]
 
-		// TODO: do the parameterized bezier lerp-ception thing.
-		LineToAbsolute([]float64{x1,y1},writer)
-
-		parameters = parameters[2:]
+		for t := 0.0; t < 1.0; t = t + 0.1 {
+			xA := Interpolate(x0, x1, t); yA := Interpolate(y0, y1, t)
+			xB := Interpolate(x1, x2, t); yB := Interpolate(y1, y2, t)
+			xC := Interpolate(x2, x3, t); yC := Interpolate(y2, y3, t)
+			xAB := Interpolate(xA, xB, t); yAB := Interpolate(yA, yB, t)
+			xBC := Interpolate(xB, xC, t); yBC := Interpolate(yB, yC, t)
+			x := Interpolate(xAB, xBC, t); y := Interpolate(yAB, yBC, t)
+			var l []string
+			l, out = lineAbsoluteLines(x, y, out)
+			lines = append(lines, l...)
+		}
+		var l []string
+		l, out = lineAbsoluteLines(x3, y3, out)
+		lines = append(lines, l...)
+		params = params[6:]
 	}
+	return
 }
 
-func QuadraticBezierSmoothCurveRelative(parameters []float64, writer *GCodeWriter) {
+func CubicBezierSmoothCurveAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 2; {
-		dx1 := writer.X + parameters[0];
-		dy1 := writer.Y + parameters[1];
-
-		// TODO: do the parameterized bezier lerp-ception thing.
-		LineToAbsolute([]float64{dx1,dy1},writer)
-
-		parameters = parameters[2:]
+	for len(params) >= 4 {
+		x1 := params[0]; y1 := params[1]
+		x := params[2]; y := params[3]
+		var l []string
+		l, out = lineAbsoluteLines(x1, y1, out)
+		lines = append(lines, l...)
+		l, out = lineAbsoluteLines(x, y, out)
+		lines = append(lines, l...)
+		params = params[4:]
 	}
+	return
 }
 
-
-func VerticalAbsolute(parameters []float64, writer *GCodeWriter) {
+func CubicBezierSmoothCurveRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 1; {
-		x := writer.X
-		y := parameters[0]
-
-		LineToAbsolute([]float64{x,y},writer)
-		parameters = parameters[1:]
+	for len(params) >= 4 {
+		x0, y0 := out.X, out.Y
+		dx1 := x0 + params[0]; dy1 := y0 + params[1]
+		dx := x0 + params[2]; dy := y0 + params[3]
+		var l []string
+		l, out = lineAbsoluteLines(dx1, dy1, out)
+		lines = append(lines, l...)
+		l, out = lineAbsoluteLines(dx, dy, out)
+		lines = append(lines, l...)
+		params = params[4:]
 	}
+	return
 }
 
-func VerticalRelative(parameters []float64, writer *GCodeWriter) {
+func HorizontalAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
 	defer logx.Indent(2)()
+	out = ctx
 
-	for ;len(parameters) >= 1; {
-		x := writer.X
-		y := writer.Y + parameters[0]
-
-		LineToAbsolute([]float64{x,y},writer)
-		parameters = parameters[1:]
+	for len(params) >= 1 {
+		x := params[0]
+		y := out.Y
+		var l []string
+		l, out = lineAbsoluteLines(x, y, out)
+		lines = append(lines, l...)
+		params = params[1:]
 	}
+	return
+}
+
+func HorizontalRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 1 {
+		x := out.X + params[0]
+		y := out.Y
+		var l []string
+		l, out = lineAbsoluteLines(x, y, out)
+		lines = append(lines, l...)
+		params = params[1:]
+	}
+	return
+}
+
+func QuadraticBezierCurveAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 4 {
+		x0, y0 := out.X, out.Y
+		x1 := params[0]; y1 := params[1]
+		x2 := params[2]; y2 := params[3]
+
+		for t := 0.0; t < 1.0; t = t + 0.1 {
+			xA := Interpolate(x0, x1, t); yA := Interpolate(y0, y1, t)
+			xB := Interpolate(x1, x2, t); yB := Interpolate(y1, y2, t)
+			x := Interpolate(xA, xB, t); y := Interpolate(yA, yB, t)
+			var l []string
+			l, out = lineAbsoluteLines(x, y, out)
+			lines = append(lines, l...)
+		}
+		var l []string
+		l, out = lineAbsoluteLines(x2, y2, out)
+		lines = append(lines, l...)
+		params = params[4:]
+	}
+	return
+}
+
+func QuadraticBezierCurveRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 4 {
+		x0, y0 := out.X, out.Y
+		x1 := out.X + params[0]; y1 := out.Y + params[1]
+		x2 := out.X + params[2]; y2 := out.Y + params[3]
+
+		for t := 0.0; t < 1.0; t = t + 0.1 {
+			xA := Interpolate(x0, x1, t); yA := Interpolate(y0, y1, t)
+			xB := Interpolate(x1, x2, t); yB := Interpolate(y1, y2, t)
+			x := Interpolate(xA, xB, t); y := Interpolate(yA, yB, t)
+			var l []string
+			l, out = lineAbsoluteLines(x, y, out)
+			lines = append(lines, l...)
+		}
+		var l []string
+		l, out = lineAbsoluteLines(x2, y2, out)
+		lines = append(lines, l...)
+		params = params[4:]
+	}
+	return
+}
+
+func QuadraticBezierSmoothCurveAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 2 {
+		x1 := params[0]; y1 := params[1]
+		var l []string
+		l, out = lineAbsoluteLines(x1, y1, out)
+		lines = append(lines, l...)
+		params = params[2:]
+	}
+	return
+}
+
+func QuadraticBezierSmoothCurveRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 2 {
+		dx1 := out.X + params[0]; dy1 := out.Y + params[1]
+		var l []string
+		l, out = lineAbsoluteLines(dx1, dy1, out)
+		lines = append(lines, l...)
+		params = params[2:]
+	}
+	return
+}
+
+func VerticalAbsolute(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 1 {
+		x := out.X
+		y := params[0]
+		var l []string
+		l, out = lineAbsoluteLines(x, y, out)
+		lines = append(lines, l...)
+		params = params[1:]
+	}
+	return
+}
+
+func VerticalRelative(params []float64, ctx CarveCtx) (lines []string, out CarveCtx) {
+	defer logx.Indent(2)()
+	out = ctx
+
+	for len(params) >= 1 {
+		x := out.X
+		y := out.Y + params[0]
+		var l []string
+		l, out = lineAbsoluteLines(x, y, out)
+		lines = append(lines, l...)
+		params = params[1:]
+	}
+	return
+}
+
+// pathHandlers is the dispatch table (Candidate 3).
+var pathHandlers = map[string]PathHandler{
+	"A": EllipticArcAbsolute,
+	"a": EllipticArcRelative,
+	"C": CubicBezierCurveAbsolute,
+	"c": CubicBezierCurveRelative,
+	"H": HorizontalAbsolute,
+	"h": HorizontalRelative,
+	"L": LineToAbsolute,
+	"l": LineToRelative,
+	"M": MoveAbsolute,
+	"m": MoveRelative,
+	"Q": QuadraticBezierCurveAbsolute,
+	"q": QuadraticBezierCurveRelative,
+	"S": CubicBezierSmoothCurveAbsolute,
+	"s": CubicBezierSmoothCurveRelative,
+	"T": QuadraticBezierSmoothCurveAbsolute,
+	"t": QuadraticBezierSmoothCurveRelative,
+	"V": VerticalAbsolute,
+	"v": VerticalRelative,
+	"Z": Close,
+	"z": Close,
 }
 
 func carveSvgCircle(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.Transform) {
 	defer logx.Indent(2)()
 
-	cxStr := input.AttributeDefault("cx","0")
-	cyStr := input.AttributeDefault("cy","0")
-	rxStr := input.AttributeDefault("rx","auto")
-	ryStr := input.AttributeDefault("ry","auto")
+	cxStr := input.AttributeDefault("cx", "0")
+	cyStr := input.AttributeDefault("cy", "0")
+	rxStr := input.AttributeDefault("rx", "auto")
+	ryStr := input.AttributeDefault("ry", "auto")
 
 	if strings.HasSuffix(cxStr, "%") || strings.HasSuffix(cyStr, "%") ||
 		strings.HasSuffix(rxStr, "%") || strings.HasSuffix(ryStr, "%") {
@@ -480,11 +555,11 @@ func carveSvgCircle(input *svg.XmlElement, writer *GCodeWriter, transforms []svg
 	ry := svg.MustParseNumber(ryStr)
 
 	pathData := fmt.Sprintf("M %f %f A %f %f A %f %f A %f %f A %f %f",
-		cx+rx,cy,
-		cx,cy+ry,
-		cx-rx,cy,
-		cx,cy-ry,
-		cx+rx,cy)
+		cx+rx, cy,
+		cx, cy+ry,
+		cx-rx, cy,
+		cx, cy-ry,
+		cx+rx, cy)
 	carveSvgPathData(pathData, writer, transforms)
 }
 
@@ -498,43 +573,27 @@ func carveSvgPath(input *svg.XmlElement, writer *GCodeWriter, transforms []svg.T
 func carveSvgPathData(pathData string, writer *GCodeWriter, transforms []svg.Transform) {
 	writer.Comment(fmt.Sprintf("-- Carving path Data: %s\n", pathData))
 	writer.SetTransforms(transforms)
-	writer.X = 0
-	writer.Y = 0
-	writer.StartX = 0
-	writer.StartY = 0
+	writer.Ctx.PathCursor = PathCursor{}
 	writer.CommentCurrentXY("  Carving path data 0,0 is")
 
 	pathCommands := svg.ParseSvgPathData(pathData)
-	for _, command := range(pathCommands) {
+	for _, command := range pathCommands {
 		writer.Comment(fmt.Sprintf("[DEBUG] %#v\n", command))
-		switch(command.Command) {
-		case "A": EllipticArcAbsolute(command.Parameters, writer)
-		case "a": EllipticArcRelative(command.Parameters, writer)
-		case "C": CubicBezierCurveAbsolute(command.Parameters, writer)
-		case "c": CubicBezierCurveRelative(command.Parameters, writer)
-		case "H": HorizontalAbsolute(command.Parameters, writer)
-		case "h": HorizontalRelative(command.Parameters, writer)
-		case "L": LineToAbsolute(command.Parameters, writer)
-		case "l": LineToRelative(command.Parameters, writer)
-		case "M": MoveAbsolute(command.Parameters, writer)
-		case "m": MoveRelative(command.Parameters, writer)
-		case "Q": QuadraticBezierCurveAbsolute(command.Parameters, writer)
-		case "q": QuadraticBezierCurveRelative(command.Parameters, writer)
-		case "S": CubicBezierSmoothCurveAbsolute(command.Parameters, writer)
-		case "s": CubicBezierSmoothCurveRelative(command.Parameters, writer)
-		case "T": QuadraticBezierSmoothCurveAbsolute(command.Parameters, writer)
-		case "t": QuadraticBezierSmoothCurveRelative(command.Parameters, writer)
-		case "V": VerticalAbsolute(command.Parameters, writer)
-		case "v": VerticalRelative(command.Parameters, writer)
-		case "Z": Close(writer)
-		case "z": Close(writer)
+		handler, ok := pathHandlers[command.Command]
+		if !ok {
+			log.Printf("[WARN] Unexpected command '%s'", command.Command)
+			continue
+		}
+		lines, newCtx := handler(command.Parameters, writer.Ctx)
+		writer.Ctx = newCtx
+		for _, line := range lines {
+			writer.Write(line)
 		}
 	}
 	writer.LiftToSafeHeight()
 }
 
 func (this *SvgxElement) Carve(writer *GCodeWriter, transforms []svg.Transform) {
-
 	elementTransformStr := this.XmlElement.Attribute("transform")
 	if len(elementTransformStr) != 0 {
 		elementTransform, _ := svg.ParseTransformList(elementTransformStr)
@@ -542,8 +601,10 @@ func (this *SvgxElement) Carve(writer *GCodeWriter, transforms []svg.Transform) 
 	}
 
 	switch this.XmlElement.Name {
-	case "": return
-	case "http://www.w3.org/2000/svg:desc": return
+	case "":
+		return
+	case "http://www.w3.org/2000/svg:desc":
+		return
 	default:
 		writer.Comment(fmt.Sprintf("this.XmlElement.id: %s this.XmlElement.Name: %#v transform: %#v\n",
 			this.XmlElement.Attribute("id"),
@@ -551,25 +612,25 @@ func (this *SvgxElement) Carve(writer *GCodeWriter, transforms []svg.Transform) 
 			transforms))
 	}
 
-	var gcodeDesc *GCodeDesc
-	for element := this; gcodeDesc == nil && element != nil; element = element.Parent {
-		gcodeDesc = element.GCodeDesc
-	}
+	// Candidate 4: use pre-computed EffectiveDesc instead of parent-chain walk
+	gcodeDesc := this.EffectiveDesc
 
 	if gcodeDesc != nil && gcodeDesc.CarveDepth != "" {
-		writer.GCodeDesc = gcodeDesc
+		writer.Ctx.SafeHeight = gcodeDesc.GetSafeHeight(10)
 		writer.LiftToSafeHeight()
-		writer.CurrentDepth = 0
-		carveDepth := svg.MustParseNumber(gcodeDesc.CarveDepth)
-		for ;writer.CurrentDepth < carveDepth; {
-			writer.CurrentDepth = writer.CurrentDepth + 1 // TODO use carve increment instead.
-			if writer.CurrentDepth > carveDepth {
-				writer.CurrentDepth = carveDepth
+		writer.Ctx.Depth = 0
+		carveDepth := gcodeDesc.GetCarveDepth(0)
+		for writer.Ctx.Depth < carveDepth {
+			writer.Ctx.Depth = writer.Ctx.Depth + 1
+			if writer.Ctx.Depth > carveDepth {
+				writer.Ctx.Depth = carveDepth
 			}
-			writer.Comment(fmt.Sprintf("-- CurrentDepth: %f CarveDepth: %f\n", writer.CurrentDepth, carveDepth))
+			writer.Comment(fmt.Sprintf("-- CurrentDepth: %f CarveDepth: %f\n", writer.Ctx.Depth, carveDepth))
 			switch this.XmlElement.Name {
-			case "http://www.w3.org/2000/svg:path": carveSvgPath(this.XmlElement, writer, transforms)
-			case "http://www.w3.org/2000/svg:circle": carveSvgCircle(this.XmlElement, writer, transforms)
+			case "http://www.w3.org/2000/svg:path":
+				carveSvgPath(this.XmlElement, writer, transforms)
+			case "http://www.w3.org/2000/svg:circle":
+				carveSvgCircle(this.XmlElement, writer, transforms)
 			}
 		}
 	}

@@ -45,12 +45,12 @@ type Document struct {
 	BackMatter Matter
 }
 
-func (this *Document) Height() (string) {
-	return this.Root.Attribute("width")
+func (this *Document) Height() string {
+	return this.Root.Attribute("height")
 }
 
-func (this *Document) Width() (string) {
-	return this.Root.Attribute("height")
+func (this *Document) Width() string {
+	return this.Root.Attribute("width")
 }
 
 func (this *Document) ViewBox() (string) {
