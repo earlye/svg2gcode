@@ -12,6 +12,7 @@ type SvgxDocument struct {
 	SvgDocument *svg.Document
 	Root *SvgxElement
 	OriginMarker *svg.XmlElement
+	MmPerUnit float64
 }
 
 func (this *SvgxDocument) MarshalYAML() (result interface{}, err error) {
@@ -32,6 +33,7 @@ func (this *SvgxDocument) MarshalYAML() (result interface{}, err error) {
 func (this *SvgxDocument) Carve(output io.Writer) {
 	writer := &GCodeWriter{
 		Writer: output,
+		Ctx:    CarveCtx{MmPerUnit: this.MmPerUnit},
 	}
 	writer.Comment(fmt.Sprintf("Source: %s\n", this.Filename))
 	transform := []svg.Transform{svg.Transform{
