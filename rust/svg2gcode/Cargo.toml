@@ -1,0 +1,10 @@
+[package]
+name = "svg2gcode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "2"

@@ -1,0 +1,12 @@
+[package]
+name = "svg2gcode-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "svg2gcode"
+path = "src/main.rs"
+
+[dependencies]
+svg2gcode = { path = "../svg2gcode" }
+clap = { version = "4", features = ["derive"] }
