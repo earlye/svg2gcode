@@ -11,14 +11,14 @@ pub enum NumberError {
     Incomplete(String),
 }
 
-fn is_space(b: u8) -> bool {
+pub(crate) fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r')
 }
 
 /// Scans a leading `[+-]?(digits(.digits)?|.digits)([eE][+-]?digits)?` token
 /// from `s`, mirroring svg.NumberPattern. Returns the byte length consumed,
 /// or `None` if `s` doesn't start with a valid number.
-fn scan_number(s: &str) -> Option<usize> {
+pub(crate) fn scan_number(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let n = bytes.len();
     let mut i = 0;
