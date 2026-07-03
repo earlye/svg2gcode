@@ -657,6 +657,7 @@ pub enum CarveError {
 
 /// Port of SvgxElement.go's SvgxElement + Carve(), built on the tree
 /// LoadDocument.go constructs (see svgx_document.rs).
+#[derive(Debug)]
 pub struct SvgxElement<'a> {
     pub node: roxmltree::Node<'a, 'a>,
     pub gcode_desc: Option<GCodeDesc>,
