@@ -4,13 +4,15 @@
 //! lives in svgx_document.rs alongside LoadDocument, once the ramping/
 //! sentinel-resolution design question is resolved.
 
+use crate::document::name_to_key;
+use crate::gcode_desc::{CutContext, CutDepth, DepthResolver, GCodeDesc, ResolveError};
 use crate::gcode_writer::lift_to_safe_height_lines;
+use crate::gcode_writer::GCodeWriter;
 use crate::number::must_parse_number;
 use crate::path_cursor::{CarveCtx, PathCursor, PathHandler};
 use crate::path_data::parse_svg_path_data;
 use crate::transform::apply_transform_list;
-use crate::gcode_writer::GCodeWriter;
-use crate::transform::Transform;
+use crate::transform::{parse_transform_list, Transform};
 
 // --- pure helpers ---
 
@@ -570,14 +572,18 @@ pub fn carve_svg_path(node: &roxmltree::Node, writer: &mut GCodeWriter, transfor
     carve_svg_path_data(path_data, writer, transforms);
 }
 
-/// Port of Go's carveSvgCircle. NOTE (matches Go, not a port regression):
-/// this reads `rx`/`ry` attributes, not the standard `<circle>` `r`
-/// attribute -- so a real `<circle r="50"/>` with no explicit rx/ry will
-/// hit `must_parse_number("auto")` and panic here, exactly as it panics in
-/// Go's `svg.MustParseNumber("auto")`. This lines up with `<circle>` still
-/// being marked TODO in README.md: this code path is incomplete/
-/// experimental in the Go original, not something introduced by the port.
-pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transforms: Vec<Transform>) {
+/// Port of Go's carveSvgCircle's path-synthesis step, split out so both
+/// `carve_svg_circle` and the depth-sentinel waypoint lookup (see
+/// `first_waypoint_mm` / `SvgxElement::carve_depth_ramp`) can share it
+/// instead of re-deriving cx/cy/rx/ry twice. NOTE (matches Go, not a port
+/// regression): this reads `rx`/`ry` attributes, not the standard
+/// `<circle>` `r` attribute -- so a real `<circle r="50"/>` with no
+/// explicit rx/ry will hit `must_parse_number("auto")` and panic here,
+/// exactly as it panics in Go's `svg.MustParseNumber("auto")`. This lines
+/// up with `<circle>` still being marked TODO in README.md: this code path
+/// is incomplete/experimental in the Go original, not something introduced
+/// by the port.
+pub fn circle_path_data(node: &roxmltree::Node) -> Option<String> {
     let cx_str = node.attribute("cx").unwrap_or("0");
     let cy_str = node.attribute("cy").unwrap_or("0");
     let rx_str = node.attribute("rx").unwrap_or("auto");
@@ -585,7 +591,7 @@ pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transf
 
     if [cx_str, cy_str, rx_str, ry_str].iter().any(|s| s.ends_with('%')) {
         // Go logs an ERROR and returns without carving; percentages aren't supported.
-        return;
+        return None;
     }
 
     let cx = must_parse_number(cx_str);
@@ -593,7 +599,7 @@ pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transf
     let rx = must_parse_number(rx_str);
     let ry = must_parse_number(ry_str);
 
-    let path_data = format!(
+    Some(format!(
         "M {:.6} {:.6} A {:.6} {:.6} A {:.6} {:.6} A {:.6} {:.6} A {:.6} {:.6}",
         cx + rx,
         cy,
@@ -605,8 +611,155 @@ pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transf
         cy - ry,
         cx + rx,
         cy
-    );
-    carve_svg_path_data(&path_data, writer, transforms);
+    ))
+}
+
+pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transforms: Vec<Transform>) {
+    if let Some(path_data) = circle_path_data(node) {
+        carve_svg_path_data(&path_data, writer, transforms);
+    }
+}
+
+/// The (x, y) of an element's first cut waypoint, in millimeters, post
+/// element-transform and post-MmPerUnit scale -- i.e. already in the units
+/// CutContext promises. Used only to build a CutContext for resolving a
+/// depth sentinel; not part of Go (which never needed to look ahead into a
+/// path before carving it).
+fn first_waypoint_mm(path_data: &str, transforms: &[Transform], mm_per_unit: f64) -> Option<(f64, f64)> {
+    let first = parse_svg_path_data(path_data).into_iter().next()?;
+    if first.parameters.len() < 2 {
+        return None;
+    }
+    let (mut tx, mut ty) = apply_transform_list(first.parameters[0], first.parameters[1], transforms);
+    tx *= mm_per_unit;
+    ty *= mm_per_unit;
+    Some((tx, ty))
+}
+
+/// The element's "d" (for `<path>`) or synthesized circle path data,
+/// without carving anything -- shared by the depth-ramp loop (to run the
+/// same path data on every pass) and `first_waypoint_mm` (to resolve a
+/// sentinel before the first pass).
+fn element_path_data(node: &roxmltree::Node) -> Option<String> {
+    let tag = node.tag_name();
+    match name_to_key(tag.namespace(), tag.name()).as_str() {
+        "http://www.w3.org/2000/svg:path" => node.attribute("d").map(str::to_string),
+        "http://www.w3.org/2000/svg:circle" => circle_path_data(node),
+        _ => None,
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CarveError {
+    #[error("failed to resolve carve-depth sentinel: {0}")]
+    Resolve(#[from] ResolveError),
+}
+
+/// Port of SvgxElement.go's SvgxElement + Carve(), built on the tree
+/// LoadDocument.go constructs (see svgx_document.rs).
+pub struct SvgxElement<'a> {
+    pub node: roxmltree::Node<'a, 'a>,
+    pub gcode_desc: Option<GCodeDesc>,
+    pub effective_desc: Option<GCodeDesc>,
+    pub children: Vec<SvgxElement<'a>>,
+}
+
+impl<'a> SvgxElement<'a> {
+    pub fn carve(
+        &self,
+        writer: &mut GCodeWriter,
+        transforms: Vec<Transform>,
+        resolver: &dyn DepthResolver,
+    ) -> Result<(), CarveError> {
+        let mut transforms = transforms;
+        if let Some(transform_str) = self.node.attribute("transform") {
+            if !transform_str.is_empty() {
+                // Go discards a parse error here and uses whatever partial
+                // transform list it had built so far; parse_transform_list
+                // doesn't expose partial results on Err, so this port
+                // simplifies to "no element-level transform" on failure
+                // instead. Undetected by any test (Transform_test.go
+                // doesn't exercise this call site).
+                if let Ok(element_transform) = parse_transform_list(transform_str) {
+                    let mut combined = element_transform;
+                    combined.extend(transforms);
+                    transforms = combined;
+                }
+            }
+        }
+
+        let tag = self.node.tag_name();
+        let key = name_to_key(tag.namespace(), tag.name());
+        match key.as_str() {
+            "" => return Ok(()),
+            "http://www.w3.org/2000/svg:desc" => return Ok(()),
+            _ => {
+                writer.comment(&format!(
+                    "this.XmlElement.id: {} this.XmlElement.Name: {:?} transform: {:?}\n",
+                    self.node.attribute("id").unwrap_or(""),
+                    key,
+                    transforms
+                ));
+            }
+        }
+
+        if let Some(desc) = self.effective_desc.clone() {
+            if let Some(cut_depth) = desc.carve_depth() {
+                self.carve_depth_ramp(writer, &transforms, &desc, cut_depth, resolver)?;
+            }
+        }
+
+        for child in &self.children {
+            child.carve(writer, transforms.clone(), resolver)?;
+        }
+        Ok(())
+    }
+
+    fn carve_depth_ramp(
+        &self,
+        writer: &mut GCodeWriter,
+        transforms: &[Transform],
+        desc: &GCodeDesc,
+        cut_depth: CutDepth,
+        resolver: &dyn DepthResolver,
+    ) -> Result<(), CarveError> {
+        writer.ctx.safe_height = desc.get_safe_height(10.0);
+        writer.lift_to_safe_height();
+        writer.ctx.depth = 0.0;
+
+        let path_data = element_path_data(&self.node);
+
+        let carve_depth = match cut_depth {
+            CutDepth::Fixed(mm) => mm,
+            CutDepth::Sentinel(name) => {
+                // Resolved once per element, at its first waypoint -- not
+                // re-resolved per ramp pass or per point within the path.
+                // See issue-019f1a9b's grill log and the follow-up
+                // top/bottom-reference issue for why a richer per-point
+                // model is deferred rather than built here.
+                let (x, y) = path_data
+                    .as_deref()
+                    .and_then(|d| first_waypoint_mm(d, transforms, writer.ctx.mm_per_unit))
+                    .unwrap_or((0.0, 0.0));
+                resolver.resolve(&name, &CutContext { x, y })?
+            }
+        };
+
+        while writer.ctx.depth < carve_depth {
+            writer.ctx.depth += 1.0;
+            if writer.ctx.depth > carve_depth {
+                writer.ctx.depth = carve_depth;
+            }
+            writer.comment(&format!(
+                "-- CurrentDepth: {:.6} CarveDepth: {:.6}\n",
+                writer.ctx.depth, carve_depth
+            ));
+            if let Some(d) = &path_data {
+                carve_svg_path_data(d, writer, transforms.to_vec());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -685,5 +838,98 @@ mod tests {
 
         let (_, out) = quadratic_bezier_curve_absolute(&[1.0, 1.0, 2.0, 0.0], ctx());
         assert_eq!((out.x, out.y), (2.0, 0.0));
+    }
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct SharedBuf(Rc<RefCell<Vec<u8>>>);
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FixedResolver(f64);
+    impl DepthResolver for FixedResolver {
+        fn resolve(&self, _sentinel: &str, _ctx: &CutContext) -> Result<f64, ResolveError> {
+            Ok(self.0)
+        }
+    }
+
+    struct FailingResolver;
+    impl DepthResolver for FailingResolver {
+        fn resolve(&self, sentinel: &str, _ctx: &CutContext) -> Result<f64, ResolveError> {
+            Err(ResolveError(format!("no resolver for '{sentinel}'")))
+        }
+    }
+
+    fn path_element<'a>(doc: &'a roxmltree::Document<'a>, desc: Option<GCodeDesc>) -> SvgxElement<'a> {
+        let node = doc.root_element().children().find(|n| n.is_element()).unwrap();
+        SvgxElement { node, gcode_desc: desc.clone(), effective_desc: desc, children: vec![] }
+    }
+
+    #[test]
+    fn test_carve_fixed_depth_runs_ramp_passes() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let desc = GCodeDesc { carve_depth: Some("3mm".to_string()), ..Default::default() };
+        let element = path_element(&doc, Some(desc));
+
+        let buf = Rc::new(RefCell::new(Vec::new()));
+        let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
+        writer.ctx.mm_per_unit = 1.0;
+
+        element.carve(&mut writer, vec![], &FixedResolver(0.0)).unwrap();
+
+        let output = String::from_utf8(buf.borrow().clone()).unwrap();
+        assert_eq!(output.matches("-- CurrentDepth:").count(), 3);
+    }
+
+    #[test]
+    fn test_carve_sentinel_depth_uses_resolver() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let desc = GCodeDesc { carve_depth: Some("full".to_string()), ..Default::default() };
+        let element = path_element(&doc, Some(desc));
+
+        let buf = Rc::new(RefCell::new(Vec::new()));
+        let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
+        writer.ctx.mm_per_unit = 1.0;
+
+        element.carve(&mut writer, vec![], &FixedResolver(2.0)).unwrap();
+
+        let output = String::from_utf8(buf.borrow().clone()).unwrap();
+        assert_eq!(output.matches("-- CurrentDepth:").count(), 2);
+    }
+
+    #[test]
+    fn test_carve_sentinel_resolver_error_aborts() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let desc = GCodeDesc { carve_depth: Some("full".to_string()), ..Default::default() };
+        let element = path_element(&doc, Some(desc));
+
+        let mut writer = GCodeWriter::new(Box::new(Vec::new()));
+        writer.ctx.mm_per_unit = 1.0;
+
+        let result = element.carve(&mut writer, vec![], &FailingResolver);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_carve_no_carve_depth_is_a_noop_but_not_an_error() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let element = path_element(&doc, None);
+
+        let mut writer = GCodeWriter::new(Box::new(Vec::new()));
+        writer.ctx.mm_per_unit = 1.0;
+
+        element.carve(&mut writer, vec![], &FailingResolver).unwrap();
     }
 }
