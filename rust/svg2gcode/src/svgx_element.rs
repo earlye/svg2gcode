@@ -150,13 +150,17 @@ fn angle_radians(u_x: f64, u_y: f64, v_x: f64, v_y: f64) -> f64 {
     //
     // NOTE: Go's original computes magV as sqrt(uX^2+uY^2) -- a copy-paste
     // bug, it should use vX/vY. Not covered by any test (svgx/ has no
-    // *_test.go files at all); fixed here since it's clearly unintentional
-    // and the correct formula is strictly more robust for degenerate or
-    // asymmetric arc parameters. In practice this barely changes output for
-    // well-formed arcs: by construction (spec Eq 5.5/5.6), both magU and
-    // the correct magV are ~1, since u and v are points on the same unit
-    // auxiliary circle -- which is why "elliptical arcs work fairly well"
-    // in Go despite the bug.
+    // *_test.go files at all); fixed here since it's clearly unintentional.
+    // In practice this is unobservable through any *valid* elliptic-arc
+    // input, symmetric (rx == ry) or not: by construction (Eq 5.2's center
+    // derivation), both v-vectors this function is called with always lie
+    // on the unit auxiliary circle, so |u| == |v| == 1 is an algebraic
+    // identity here, not a coincidence tied to rx/ry -- which is why
+    // "elliptical arcs work fairly well" in Go despite the bug, for any
+    // rx/ry ratio. The fix only matters for degenerate/malformed arc
+    // parameters (see test_angle_radians_uses_correct_magnitude_for_v for
+    // a case, using arbitrary vectors, where the bug and fix genuinely
+    // diverge -- no elliptic_arc_absolute input can reach that divergence).
     let dot_product = u_x * v_x + u_y * v_y;
     let mag_u = (u_x * u_x + u_y * u_y).sqrt();
     let mag_v = (v_x * v_x + v_y * v_y).sqrt();
@@ -852,10 +856,26 @@ mod tests {
     }
 
     #[test]
+    fn test_angle_radians_uses_correct_magnitude_for_v() {
+        // u=(1,0), v=(1,1): the real angle between them is 45 degrees.
+        // Go's bug (computing magV from u instead of v, i.e. mag_u*mag_u
+        // here = 1*1 = 1) would give acos(1/1) = 0 instead of the correct
+        // acos(1/(1*sqrt(2))) = pi/4 -- a clear, hand-verifiable divergence.
+        // No elliptic_arc_absolute input can produce such a divergence: by
+        // construction (Eq 5.2), every v-vector it calls angle_radians
+        // with already lies on the unit auxiliary circle, so |u| == |v| == 1
+        // always holds there regardless of rx/ry -- this direct unit test
+        // is the only way to actually exercise the fixed formula.
+        let result = angle_radians(1.0, 0.0, 1.0, 1.0);
+        assert!((result - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_elliptic_arc_absolute_asymmetric_ellipse_reaches_endpoint() {
-        // A true ellipse (rx != ry) exercises angle_radians' magV fix --
-        // for rx == ry the fix and Go's copy-pasted-magU bug are numerically
-        // indistinguishable (both magU and the correct magV are ~1).
+        // A true ellipse (rx != ry) -- a plain regression test for a
+        // non-circular arc's endpoint, independent of the angle_radians
+        // fix (see test_angle_radians_uses_correct_magnitude_for_v for
+        // that).
         let mut c = ctx();
         c.cursor.x = 0.0;
         c.cursor.y = 0.0;
