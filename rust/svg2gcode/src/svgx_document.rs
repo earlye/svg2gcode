@@ -4,6 +4,7 @@ use crate::document::{name_to_key, view_box as doc_view_box, width as doc_width,
 use crate::gcode_desc::{DepthResolver, GCodeDesc};
 use crate::gcode_writer::GCodeWriter;
 use crate::length::parse_length_mm;
+use crate::path_cursor::CarveCtx;
 use crate::number::{parse_number, NumberError};
 use crate::svgx_element::{CarveError, SvgxElement};
 use crate::transform::Transform;
@@ -136,13 +137,15 @@ pub fn load_document<'a>(
 }
 
 impl<'a> SvgxDocument<'a> {
-    pub fn carve(
-        &self,
-        output: Box<dyn std::io::Write>,
-        resolver: &dyn DepthResolver,
-    ) -> Result<(), CarveError> {
-        let mut writer = GCodeWriter::new(output);
-        writer.ctx.mm_per_unit = self.mm_per_unit;
+    /// Takes an existing GCodeWriter rather than owning the output sink
+    /// itself, so a caller (the CLI) can carve several SvgxDocuments into
+    /// one shared output stream in sequence -- matching Go's CLI, which
+    /// opens one io.Writer and calls svgxDoc.Carve(output) once per input
+    /// file. Resets `writer.ctx` to a fresh CarveCtx (keeping only
+    /// mm_per_unit) at the start, mirroring Go's `Ctx: CarveCtx{MmPerUnit:
+    /// this.MmPerUnit}` on every Carve() call.
+    pub fn carve(&self, writer: &mut GCodeWriter, resolver: &dyn DepthResolver) -> Result<(), CarveError> {
+        writer.ctx = CarveCtx { mm_per_unit: self.mm_per_unit, ..Default::default() };
         writer.comment(&format!("Source: {}\n", self.filename));
 
         let mut transforms = vec![Transform { name: "scale".to_string(), parameters: vec![1.0, -1.0] }];
@@ -151,7 +154,7 @@ impl<'a> SvgxDocument<'a> {
             transforms.push(Transform { name: "translate".to_string(), parameters: vec![-cx, -cy] });
         }
 
-        self.root.carve(&mut writer, transforms, resolver)
+        self.root.carve(writer, transforms, resolver)
     }
 }
 
@@ -243,7 +246,8 @@ mod tests {
         assert_eq!(loaded.origin_marker, Some((10.0, 20.0)));
 
         let buf = Rc::new(RefCell::new(Vec::new()));
-        loaded.carve(Box::new(SharedBuf(buf.clone())), &NoopResolver).unwrap();
+        let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
+        loaded.carve(&mut writer, &NoopResolver).unwrap();
         let output = String::from_utf8(buf.borrow().clone()).unwrap();
         assert!(output.contains("Origin: (10,20)"));
     }
