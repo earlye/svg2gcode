@@ -4,8 +4,8 @@ use crate::document::{name_to_key, view_box as doc_view_box, width as doc_width,
 use crate::gcode_desc::{DepthResolver, GCodeDesc};
 use crate::gcode_writer::GCodeWriter;
 use crate::length::parse_length_mm;
-use crate::path_cursor::CarveCtx;
 use crate::number::{parse_number, NumberError};
+use crate::path_cursor::CarveCtx;
 use crate::svgx_element::{CarveError, SvgxElement};
 use crate::transform::Transform;
 use crate::view_box::parse_view_box;
@@ -19,7 +19,10 @@ pub enum LoadError {
     #[error("origin-marker <circle> is missing a '{0}' attribute")]
     OriginMarkerMissingAttribute(&'static str),
     #[error("origin-marker <circle> has an invalid '{attribute}' attribute: {source}")]
-    OriginMarkerInvalidAttribute { attribute: &'static str, source: NumberError },
+    OriginMarkerInvalidAttribute {
+        attribute: &'static str,
+        source: NumberError,
+    },
 }
 
 /// Reads the YAML content of an element's direct `<desc>` child, if any.
@@ -59,7 +62,12 @@ fn build_svgx_tree<'a>(
         .filter(|c| c.is_element())
         .map(|c| build_svgx_tree(c, origin_marker))
         .collect();
-    SvgxElement { node, gcode_desc, effective_desc: None, children }
+    SvgxElement {
+        node,
+        gcode_desc,
+        effective_desc: None,
+        children,
+    }
 }
 
 fn compute_effective_descs(element: &mut SvgxElement, inherited: Option<GCodeDesc>) {
@@ -75,13 +83,21 @@ fn compute_effective_descs(element: &mut SvgxElement, inherited: Option<GCodeDes
 /// absent or degenerate.
 fn compute_mm_per_unit(doc: &roxmltree::Document) -> f64 {
     let root = doc.root_element();
-    let Some(view_box_str) = doc_view_box(&root) else { return 1.0 };
-    let Ok(vb) = parse_view_box(view_box_str) else { return 1.0 };
+    let Some(view_box_str) = doc_view_box(&root) else {
+        return 1.0;
+    };
+    let Ok(vb) = parse_view_box(view_box_str) else {
+        return 1.0;
+    };
     if vb.width == 0.0 {
         return 1.0;
     }
-    let Some(width_str) = doc_width(&root) else { return 1.0 };
-    let Ok(width_mm) = parse_length_mm(width_str) else { return 1.0 };
+    let Some(width_str) = doc_width(&root) else {
+        return 1.0;
+    };
+    let Ok(width_mm) = parse_length_mm(width_str) else {
+        return 1.0;
+    };
     if width_mm == 0.0 {
         return 1.0;
     }
@@ -98,7 +114,9 @@ fn compute_mm_per_unit(doc: &roxmltree::Document) -> f64 {
 fn resolve_origin_marker(node: Option<roxmltree::Node>) -> Result<Option<(f64, f64)>, LoadError> {
     let Some(node) = node else { return Ok(None) };
     if node.tag_name().name() != "circle" {
-        return Err(LoadError::OriginMarkerNotCircle(node.tag_name().name().to_string()));
+        return Err(LoadError::OriginMarkerNotCircle(
+            node.tag_name().name().to_string(),
+        ));
     }
     let cx = node
         .attribute("cx")
@@ -106,10 +124,14 @@ fn resolve_origin_marker(node: Option<roxmltree::Node>) -> Result<Option<(f64, f
     let cy = node
         .attribute("cy")
         .ok_or(LoadError::OriginMarkerMissingAttribute("cy"))?;
-    let cx = parse_number(cx)
-        .map_err(|source| LoadError::OriginMarkerInvalidAttribute { attribute: "cx", source })?;
-    let cy = parse_number(cy)
-        .map_err(|source| LoadError::OriginMarkerInvalidAttribute { attribute: "cy", source })?;
+    let cx = parse_number(cx).map_err(|source| LoadError::OriginMarkerInvalidAttribute {
+        attribute: "cx",
+        source,
+    })?;
+    let cy = parse_number(cy).map_err(|source| LoadError::OriginMarkerInvalidAttribute {
+        attribute: "cy",
+        source,
+    })?;
     Ok(Some((cx, cy)))
 }
 
@@ -133,7 +155,12 @@ pub fn load_document<'a>(
     let mut root = build_svgx_tree(doc.root_element(), &mut origin_marker_node);
     compute_effective_descs(&mut root, None);
     let origin_marker = resolve_origin_marker(origin_marker_node)?;
-    Ok(SvgxDocument { filename: filename.into(), root, origin_marker, mm_per_unit })
+    Ok(SvgxDocument {
+        filename: filename.into(),
+        root,
+        origin_marker,
+        mm_per_unit,
+    })
 }
 
 impl<'a> SvgxDocument<'a> {
@@ -144,14 +171,27 @@ impl<'a> SvgxDocument<'a> {
     /// file. Resets `writer.ctx` to a fresh CarveCtx (keeping only
     /// mm_per_unit) at the start, mirroring Go's `Ctx: CarveCtx{MmPerUnit:
     /// this.MmPerUnit}` on every Carve() call.
-    pub fn carve(&self, writer: &mut GCodeWriter, resolver: &dyn DepthResolver) -> Result<(), CarveError> {
-        writer.ctx = CarveCtx { mm_per_unit: self.mm_per_unit, ..Default::default() };
+    pub fn carve(
+        &self,
+        writer: &mut GCodeWriter,
+        resolver: &dyn DepthResolver,
+    ) -> Result<(), CarveError> {
+        writer.ctx = CarveCtx {
+            mm_per_unit: self.mm_per_unit,
+            ..Default::default()
+        };
         writer.comment(&format!("Source: {}\n", self.filename));
 
-        let mut transforms = vec![Transform { name: "scale".to_string(), parameters: vec![1.0, -1.0] }];
+        let mut transforms = vec![Transform {
+            name: "scale".to_string(),
+            parameters: vec![1.0, -1.0],
+        }];
         if let Some((cx, cy)) = self.origin_marker {
             writer.comment(&format!("Origin: ({cx},{cy})\n"));
-            transforms.push(Transform { name: "translate".to_string(), parameters: vec![-cx, -cy] });
+            transforms.push(Transform {
+                name: "translate".to_string(),
+                parameters: vec![-cx, -cy],
+            });
         }
 
         self.root.carve(writer, transforms, resolver)
@@ -234,6 +274,22 @@ mod tests {
         let doc = parse_svg_document(xml).unwrap();
         let err = load_document("test.svg", &doc).unwrap_err();
         assert!(matches!(err, LoadError::OriginMarkerMissingAttribute("cx")));
+    }
+
+    #[test]
+    fn test_origin_marker_rejects_malformed_cx() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg">
+            <circle cx="not-a-number" cy="20"><desc>origin-marker: true</desc></circle>
+        </svg>"#;
+        let doc = parse_svg_document(xml).unwrap();
+        let err = load_document("test.svg", &doc).unwrap_err();
+        assert!(matches!(
+            err,
+            LoadError::OriginMarkerInvalidAttribute {
+                attribute: "cx",
+                ..
+            }
+        ));
     }
 
     #[test]

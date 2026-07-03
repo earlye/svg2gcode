@@ -9,14 +9,10 @@
 //! charset`; this port only accepts UTF-8 input (every fixture in
 //! examples/*.svg is UTF-8 or unspecified-defaulting-to-UTF-8).
 
-use std::io::Read;
-
 #[derive(Debug, thiserror::Error)]
 pub enum DocumentError {
     #[error("input was empty")]
     Empty,
-    #[error("failed to read input: {0}")]
-    Io(#[from] std::io::Error),
     #[error("failed to parse XML: {0}")]
     Xml(#[from] roxmltree::Error),
     #[error("unexpected top-level element '{0}'")]
@@ -56,15 +52,6 @@ pub fn parse_svg_document(input: &str) -> Result<roxmltree::Document<'_>, Docume
         Some(ns) => return Err(DocumentError::UnexpectedNamespace(ns.to_string())),
     }
     Ok(doc)
-}
-
-/// Reads all of `input` as UTF-8 and parses it as an SVG document. Callers
-/// must keep the returned `String` alive as long as the `roxmltree::Document`
-/// borrowed from it is in use.
-pub fn read_svg_document(mut input: impl Read) -> Result<String, DocumentError> {
-    let mut text = String::new();
-    input.read_to_string(&mut text)?;
-    Ok(text)
 }
 
 pub fn width<'a>(root: &roxmltree::Node<'a, 'a>) -> Option<&'a str> {

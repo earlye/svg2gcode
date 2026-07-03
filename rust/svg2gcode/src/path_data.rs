@@ -60,7 +60,10 @@ pub fn parse_svg_path_data(input: &str) -> Vec<PathCommand> {
         if COMMAND_LETTERS.contains(&command) {
             let (parameters, rest) = pop_svg_path_parameters(remaining);
             remaining = rest;
-            result.push(PathCommand { command, parameters });
+            result.push(PathCommand {
+                command,
+                parameters,
+            });
         }
         // else: unexpected command character; Go logs a warning and moves
         // on (it already advanced past the character above).
@@ -76,18 +79,30 @@ mod tests {
         assert_eq!(
             parse_svg_path_data("M 0,1 A 2,3"),
             vec![
-                PathCommand { command: 'M', parameters: vec![0.0, 1.0] },
-                PathCommand { command: 'A', parameters: vec![2.0, 3.0] },
+                PathCommand {
+                    command: 'M',
+                    parameters: vec![0.0, 1.0]
+                },
+                PathCommand {
+                    command: 'A',
+                    parameters: vec![2.0, 3.0]
+                },
             ]
         );
         assert_eq!(parse_svg_path_data("+"), vec![]);
         assert_eq!(
             parse_svg_path_data("M1,2"),
-            vec![PathCommand { command: 'M', parameters: vec![1.0, 2.0] }]
+            vec![PathCommand {
+                command: 'M',
+                parameters: vec![1.0, 2.0]
+            }]
         );
         assert_eq!(
             parse_svg_path_data("M 0,0 25.4,25.4"),
-            vec![PathCommand { command: 'M', parameters: vec![0.0, 0.0, 25.4, 25.4] }]
+            vec![PathCommand {
+                command: 'M',
+                parameters: vec![0.0, 0.0, 25.4, 25.4]
+            }]
         );
     }
 }

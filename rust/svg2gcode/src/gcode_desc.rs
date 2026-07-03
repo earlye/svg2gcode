@@ -73,9 +73,13 @@ impl CutDepth {
 
 /// Where in the drawing a depth sentinel needs resolving: millimeters, post
 /// origin-transform, post-MmPerUnit scale (matching every other coordinate
-/// in the pipeline). A fresh CutContext is built for every cut waypoint --
-/// resolution is never cached per-element -- so a future height-map-backed
-/// resolver can answer "how thick at (32, 45)?" independently at each point.
+/// in the pipeline). Currently built once per element, at that element's
+/// first cut waypoint (see `SvgxElement::carve_depth_ramp`) -- not once per
+/// point or per ramp pass. A per-point-varying resolution (e.g. a future
+/// height-map-backed resolver following an uneven surface within a single
+/// path) is a deliberately deferred follow-up, not what this type promises
+/// today -- see issue-019f28e7-3d14-70a0-b290-fdb9e1af36fc-top-wasteboard-
+/// depth-references.md.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CutContext {
     pub x: f64,
@@ -101,23 +105,38 @@ mod tests {
 
     #[test]
     fn test_get_safe_height() {
-        let desc = GCodeDesc { safe_height: Some("10mm".to_string()), ..Default::default() };
+        let desc = GCodeDesc {
+            safe_height: Some("10mm".to_string()),
+            ..Default::default()
+        };
         assert_eq!(desc.get_safe_height(0.0), 10.0);
 
         let missing = GCodeDesc::default();
         assert_eq!(missing.get_safe_height(7.0), 7.0);
 
-        let invalid = GCodeDesc { safe_height: Some("not-a-length".to_string()), ..Default::default() };
+        let invalid = GCodeDesc {
+            safe_height: Some("not-a-length".to_string()),
+            ..Default::default()
+        };
         assert_eq!(invalid.get_safe_height(7.0), 7.0);
     }
 
     #[test]
     fn test_carve_depth() {
-        let fixed = GCodeDesc { carve_depth: Some("10mm".to_string()), ..Default::default() };
+        let fixed = GCodeDesc {
+            carve_depth: Some("10mm".to_string()),
+            ..Default::default()
+        };
         assert_eq!(fixed.carve_depth(), Some(CutDepth::Fixed(10.0)));
 
-        let sentinel = GCodeDesc { carve_depth: Some("full".to_string()), ..Default::default() };
-        assert_eq!(sentinel.carve_depth(), Some(CutDepth::Sentinel("full".to_string())));
+        let sentinel = GCodeDesc {
+            carve_depth: Some("full".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            sentinel.carve_depth(),
+            Some(CutDepth::Sentinel("full".to_string()))
+        );
 
         let absent = GCodeDesc::default();
         assert_eq!(absent.carve_depth(), None);
@@ -140,7 +159,11 @@ mod tests {
 
         assert_eq!(
             GCodeDesc::parse("origin-marker: true\n"),
-            Some(GCodeDesc { origin_marker: true, carve_depth: None, safe_height: None })
+            Some(GCodeDesc {
+                origin_marker: true,
+                carve_depth: None,
+                safe_height: None
+            })
         );
 
         // Genuinely malformed YAML also yields None, matching Go's

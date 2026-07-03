@@ -12,7 +12,10 @@ pub struct GCodeWriter {
 
 impl GCodeWriter {
     pub fn new(writer: Box<dyn std::io::Write>) -> Self {
-        Self { ctx: CarveCtx::default(), writer }
+        Self {
+            ctx: CarveCtx::default(),
+            writer,
+        }
     }
 
     /// Mirrors Go's GCodeWriter.Write, which also discards the underlying
@@ -98,7 +101,11 @@ mod tests {
 
     #[test]
     fn test_lift_to_safe_height_lines_noop_when_already_at_safe_height() {
-        let ctx = CarveCtx { z: 5.0, safe_height: 5.0, ..Default::default() };
+        let ctx = CarveCtx {
+            z: 5.0,
+            safe_height: 5.0,
+            ..Default::default()
+        };
         let (lines, out) = lift_to_safe_height_lines(ctx);
         assert!(lines.is_empty());
         assert_eq!(out.z, 5.0);
@@ -106,7 +113,12 @@ mod tests {
 
     #[test]
     fn test_lift_to_safe_height_lines_emits_move() {
-        let ctx = CarveCtx { z: 0.0, safe_height: 10.0, mm_per_unit: 1.0, ..Default::default() };
+        let ctx = CarveCtx {
+            z: 0.0,
+            safe_height: 10.0,
+            mm_per_unit: 1.0,
+            ..Default::default()
+        };
         let (lines, out) = lift_to_safe_height_lines(ctx);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with("G0 F1000 X0.000000 Y0.000000 Z10.000000"));

@@ -104,7 +104,10 @@ pub fn pop_number(input: &str) -> Result<(f64, &str), NumberError> {
         Some(len) if len > 0 => {
             let number_part = &after_ws[..len];
             let remaining = &after_ws[len..];
-            if remaining.starts_with('.') || remaining.starts_with('e') || remaining.starts_with('E') {
+            if remaining.starts_with('.')
+                || remaining.starts_with('e')
+                || remaining.starts_with('E')
+            {
                 return Err(NumberError::Incomplete(input.to_string()));
             }
             let value = number_part

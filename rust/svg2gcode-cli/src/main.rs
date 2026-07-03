@@ -99,7 +99,10 @@ fn main() -> ExitCode {
         Some(path) => match File::create(path) {
             Ok(f) => Box::new(f),
             Err(err) => {
-                eprintln!("error: failed to open {} for writing: {err}", path.display());
+                eprintln!(
+                    "error: failed to open {} for writing: {err}",
+                    path.display()
+                );
                 return ExitCode::FAILURE;
             }
         },

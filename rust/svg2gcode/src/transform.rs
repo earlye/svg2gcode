@@ -23,6 +23,9 @@ pub enum TransformError {
     IncompleteParameters(String),
 }
 
+// Positional args mirror Go's matrix(x,y,a,b,c,d,e,f) 1:1 -- an svg matrix() is
+// inherently a fixed 6-tuple plus the point it's applied to.
+#[allow(clippy::too_many_arguments)]
 fn matrix(x: f64, y: f64, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> (f64, f64) {
     (a * x + c * y + e, b * x + d * y + f)
 }
@@ -95,7 +98,11 @@ impl Transform {
                 if p.is_empty() {
                     return (x, y);
                 }
-                let (cx, cy) = if p.len() >= 3 { (p[1], p[2]) } else { (0.0, 0.0) };
+                let (cx, cy) = if p.len() >= 3 {
+                    (p[1], p[2])
+                } else {
+                    (0.0, 0.0)
+                };
                 rotate(x, y, cx, cy, p[0])
             }
             "skewX" => {
@@ -116,7 +123,9 @@ impl Transform {
 }
 
 pub fn apply_transform_list(x: f64, y: f64, transforms: &[Transform]) -> (f64, f64) {
-    transforms.iter().fold((x, y), |(tx, ty), t| t.apply(tx, ty))
+    transforms
+        .iter()
+        .fold((x, y), |(tx, ty), t| t.apply(tx, ty))
 }
 
 fn remove_whitespace_leading_comma(s: &str) -> &str {
@@ -184,7 +193,10 @@ pub fn parse_transform_list(input: &str) -> Result<Vec<Transform>, TransformErro
         match find_transform_call(remaining) {
             Some((name, params_str, consumed)) => {
                 let parameters = parse_transform_parameters(params_str)?;
-                result.push(Transform { name: name.to_string(), parameters });
+                result.push(Transform {
+                    name: name.to_string(),
+                    parameters,
+                });
                 remaining = remove_whitespace_leading_comma(&remaining[consumed..]);
             }
             None => {
@@ -205,8 +217,14 @@ mod tests {
         assert_eq!(
             parse_transform_list("scale(0.25,0.26), translate(15,16)").unwrap(),
             vec![
-                Transform { name: "translate".into(), parameters: vec![15.0, 16.0] },
-                Transform { name: "scale".into(), parameters: vec![0.25, 0.26] },
+                Transform {
+                    name: "translate".into(),
+                    parameters: vec![15.0, 16.0]
+                },
+                Transform {
+                    name: "scale".into(),
+                    parameters: vec![0.25, 0.26]
+                },
             ]
         );
         assert!(parse_transform_list("scale(0.25,0.26), translate(15,16), --").is_err());
@@ -215,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::type_complexity)] // table-driven test mirroring Transform_test.go's cases 1:1
     fn test_transform_apply() {
         let cases: &[(&str, &[f64], f64, f64, f64, f64, f64)] = &[
             ("scale", &[2.0, 3.0], 4.0, 5.0, 8.0, 15.0, 0.0),
@@ -227,9 +246,33 @@ mod tests {
             ("rotate", &[90.0, 2.0, 0.0], 4.0, 0.0, 2.0, 2.0, 1e-9),
             ("skewX", &[30.0], 4.0, 4.0, 7.46, 4.0, 0.1),
             ("skewY", &[30.0], 4.0, 0.0, 4.0, 3.46, 0.1),
-            ("matrix", &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0], 4.0, 5.0, 4.0, 5.0, 0.0),
-            ("matrix", &[2.0, 0.0, 0.0, 3.0, 0.0, 0.0], 4.0, 5.0, 8.0, 15.0, 0.0),
-            ("matrix", &[1.0, 0.0, 0.0, 1.0, 1.0, 2.0], 4.0, 5.0, 5.0, 7.0, 0.0),
+            (
+                "matrix",
+                &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                4.0,
+                5.0,
+                4.0,
+                5.0,
+                0.0,
+            ),
+            (
+                "matrix",
+                &[2.0, 0.0, 0.0, 3.0, 0.0, 0.0],
+                4.0,
+                5.0,
+                8.0,
+                15.0,
+                0.0,
+            ),
+            (
+                "matrix",
+                &[1.0, 0.0, 0.0, 1.0, 1.0, 2.0],
+                4.0,
+                5.0,
+                5.0,
+                7.0,
+                0.0,
+            ),
             ("matrix", &[], 4.0, 5.0, 4.0, 5.0, 0.0),
             ("rotate", &[], 4.0, 5.0, 4.0, 5.0, 0.0),
             ("skewX", &[], 4.0, 5.0, 4.0, 5.0, 0.0),
@@ -238,7 +281,10 @@ mod tests {
         ];
 
         for &(name, params, x, y, expect_x, expect_y, delta) in cases {
-            let t = Transform { name: name.into(), parameters: params.to_vec() };
+            let t = Transform {
+                name: name.into(),
+                parameters: params.to_vec(),
+            };
             let (rx, ry) = t.apply(x, y);
             assert!(
                 (rx - expect_x).abs() <= delta,

@@ -55,7 +55,12 @@ pub fn parse_view_box(input: &str) -> Result<ViewBox, ViewBoxError> {
     if !rest.is_empty() {
         return Err(ViewBoxError(input.to_string()));
     }
-    Ok(ViewBox { min_x, min_y, width, height })
+    Ok(ViewBox {
+        min_x,
+        min_y,
+        width,
+        height,
+    })
 }
 
 #[cfg(test)]
@@ -69,17 +74,32 @@ mod tests {
         assert!(parse_view_box("").is_err());
         assert_eq!(
             parse_view_box("0 0 25.4 25.4").unwrap(),
-            ViewBox { min_x: 0.0, min_y: 0.0, width: 25.4, height: 25.4 }
+            ViewBox {
+                min_x: 0.0,
+                min_y: 0.0,
+                width: 25.4,
+                height: 25.4
+            }
         );
         assert_eq!(
             parse_view_box("1 2 3 4").unwrap(),
-            ViewBox { min_x: 1.0, min_y: 2.0, width: 3.0, height: 4.0 }
+            ViewBox {
+                min_x: 1.0,
+                min_y: 2.0,
+                width: 3.0,
+                height: 4.0
+            }
         );
         // Separator grammar is optional comma + *required* whitespace, so
         // "1,2" (comma with no following space) is invalid, but "1, 2" is.
         assert_eq!(
             parse_view_box("1, 2 3, 4").unwrap(),
-            ViewBox { min_x: 1.0, min_y: 2.0, width: 3.0, height: 4.0 }
+            ViewBox {
+                min_x: 1.0,
+                min_y: 2.0,
+                width: 3.0,
+                height: 4.0
+            }
         );
         assert!(parse_view_box("1,2 3,4").is_err());
     }

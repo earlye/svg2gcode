@@ -1,8 +1,8 @@
-//! Port of svgx/SvgxElement.go's path-command handlers and pure gcode-line
-//! helpers. The SvgxElement tree type + Carve traversal (which walks the
-//! element tree, handles GCodeDesc/CutDepth, and integrates DepthResolver)
-//! lives in svgx_document.rs alongside LoadDocument, once the ramping/
-//! sentinel-resolution design question is resolved.
+//! Port of svgx/SvgxElement.go: path-command handlers, pure gcode-line
+//! helpers, and the SvgxElement tree type + Carve traversal (walks the
+//! element tree, handles GCodeDesc/CutDepth, and integrates DepthResolver).
+//! Document/LoadDocument-level concerns (origin marker, MmPerUnit, tree
+//! construction) live in svgx_document.rs.
 
 use crate::document::name_to_key;
 use crate::gcode_desc::{CutContext, CutDepth, DepthResolver, GCodeDesc, ResolveError};
@@ -160,7 +160,11 @@ fn angle_radians(u_x: f64, u_y: f64, v_x: f64, v_y: f64) -> f64 {
     let dot_product = u_x * v_x + u_y * v_y;
     let mag_u = (u_x * u_x + u_y * u_y).sqrt();
     let mag_v = (v_x * v_x + v_y * v_y).sqrt();
-    let sign: f64 = if u_x * v_y - u_y * v_x < 0.0 { -1.0 } else { 1.0 };
+    let sign: f64 = if u_x * v_y - u_y * v_x < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
     sign * (dot_product / (mag_u * mag_v)).acos()
 }
 
@@ -190,10 +194,10 @@ fn elliptic_arc_absolute(params: &[f64], ctx: CarveCtx) -> (Vec<String>, CarveCt
         let y1_prime = phi.sin() * u0 + phi.cos() * v0;
 
         // Eq 5.2
-        let mut coeff = ((rx * rx * ry * ry - rx * rx * y1_prime * y1_prime
-            - ry * ry * x1_prime * x1_prime)
-            / (rx * rx * y1_prime * y1_prime + ry * ry * x1_prime * x1_prime))
-            .sqrt();
+        let mut coeff =
+            ((rx * rx * ry * ry - rx * rx * y1_prime * y1_prime - ry * ry * x1_prime * x1_prime)
+                / (rx * rx * y1_prime * y1_prime + ry * ry * x1_prime * x1_prime))
+                .sqrt();
         if f_a == f_s {
             coeff = -coeff;
         }
@@ -462,7 +466,10 @@ fn quadratic_bezier_curve_relative(params: &[f64], ctx: CarveCtx) -> (Vec<String
     (lines, out)
 }
 
-fn quadratic_bezier_smooth_curve_absolute(params: &[f64], ctx: CarveCtx) -> (Vec<String>, CarveCtx) {
+fn quadratic_bezier_smooth_curve_absolute(
+    params: &[f64],
+    ctx: CarveCtx,
+) -> (Vec<String>, CarveCtx) {
     let mut out = ctx;
     let mut lines = Vec::new();
     let mut params = params;
@@ -476,7 +483,10 @@ fn quadratic_bezier_smooth_curve_absolute(params: &[f64], ctx: CarveCtx) -> (Vec
     (lines, out)
 }
 
-fn quadratic_bezier_smooth_curve_relative(params: &[f64], ctx: CarveCtx) -> (Vec<String>, CarveCtx) {
+fn quadratic_bezier_smooth_curve_relative(
+    params: &[f64],
+    ctx: CarveCtx,
+) -> (Vec<String>, CarveCtx) {
     let mut out = ctx;
     let mut lines = Vec::new();
     let mut params = params;
@@ -567,7 +577,11 @@ pub fn carve_svg_path_data(path_data: &str, writer: &mut GCodeWriter, transforms
     writer.lift_to_safe_height();
 }
 
-pub fn carve_svg_path(node: &roxmltree::Node, writer: &mut GCodeWriter, transforms: Vec<Transform>) {
+pub fn carve_svg_path(
+    node: &roxmltree::Node,
+    writer: &mut GCodeWriter,
+    transforms: Vec<Transform>,
+) {
     let path_data = node.attribute("d").unwrap_or("");
     carve_svg_path_data(path_data, writer, transforms);
 }
@@ -589,7 +603,10 @@ pub fn circle_path_data(node: &roxmltree::Node) -> Option<String> {
     let rx_str = node.attribute("rx").unwrap_or("auto");
     let ry_str = node.attribute("ry").unwrap_or("auto");
 
-    if [cx_str, cy_str, rx_str, ry_str].iter().any(|s| s.ends_with('%')) {
+    if [cx_str, cy_str, rx_str, ry_str]
+        .iter()
+        .any(|s| s.ends_with('%'))
+    {
         // Go logs an ERROR and returns without carving; percentages aren't supported.
         return None;
     }
@@ -614,7 +631,11 @@ pub fn circle_path_data(node: &roxmltree::Node) -> Option<String> {
     ))
 }
 
-pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transforms: Vec<Transform>) {
+pub fn carve_svg_circle(
+    node: &roxmltree::Node,
+    writer: &mut GCodeWriter,
+    transforms: Vec<Transform>,
+) {
     if let Some(path_data) = circle_path_data(node) {
         carve_svg_path_data(&path_data, writer, transforms);
     }
@@ -625,12 +646,17 @@ pub fn carve_svg_circle(node: &roxmltree::Node, writer: &mut GCodeWriter, transf
 /// CutContext promises. Used only to build a CutContext for resolving a
 /// depth sentinel; not part of Go (which never needed to look ahead into a
 /// path before carving it).
-fn first_waypoint_mm(path_data: &str, transforms: &[Transform], mm_per_unit: f64) -> Option<(f64, f64)> {
+fn first_waypoint_mm(
+    path_data: &str,
+    transforms: &[Transform],
+    mm_per_unit: f64,
+) -> Option<(f64, f64)> {
     let first = parse_svg_path_data(path_data).into_iter().next()?;
     if first.parameters.len() < 2 {
         return None;
     }
-    let (mut tx, mut ty) = apply_transform_list(first.parameters[0], first.parameters[1], transforms);
+    let (mut tx, mut ty) =
+        apply_transform_list(first.parameters[0], first.parameters[1], transforms);
     tx *= mm_per_unit;
     ty *= mm_per_unit;
     Some((tx, ty))
@@ -769,7 +795,10 @@ mod tests {
     use crate::path_cursor::CarveCtx;
 
     fn ctx() -> CarveCtx {
-        CarveCtx { mm_per_unit: 1.0, ..Default::default() }
+        CarveCtx {
+            mm_per_unit: 1.0,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -823,6 +852,19 @@ mod tests {
     }
 
     #[test]
+    fn test_elliptic_arc_absolute_asymmetric_ellipse_reaches_endpoint() {
+        // A true ellipse (rx != ry) exercises angle_radians' magV fix --
+        // for rx == ry the fix and Go's copy-pasted-magU bug are numerically
+        // indistinguishable (both magU and the correct magV are ~1).
+        let mut c = ctx();
+        c.cursor.x = 0.0;
+        c.cursor.y = 0.0;
+        let (_, out) = elliptic_arc_absolute(&[10.0, 5.0, 0.0, 0.0, 1.0, 20.0, 0.0], c);
+        assert!((out.x - 20.0).abs() < 1e-6);
+        assert!((out.y - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn test_elliptic_arc_relative_delegates_to_absolute() {
         let mut c = ctx();
         c.cursor.x = 100.0;
@@ -869,40 +911,118 @@ mod tests {
         }
     }
 
-    fn path_element<'a>(doc: &'a roxmltree::Document<'a>, desc: Option<GCodeDesc>) -> SvgxElement<'a> {
-        let node = doc.root_element().children().find(|n| n.is_element()).unwrap();
-        SvgxElement { node, gcode_desc: desc.clone(), effective_desc: desc, children: vec![] }
+    fn path_element<'a>(
+        doc: &'a roxmltree::Document<'a>,
+        desc: Option<GCodeDesc>,
+    ) -> SvgxElement<'a> {
+        let node = doc
+            .root_element()
+            .children()
+            .find(|n| n.is_element())
+            .unwrap();
+        SvgxElement {
+            node,
+            gcode_desc: desc.clone(),
+            effective_desc: desc,
+            children: vec![],
+        }
     }
 
     #[test]
     fn test_carve_fixed_depth_runs_ramp_passes() {
         let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
         let doc = roxmltree::Document::parse(xml).unwrap();
-        let desc = GCodeDesc { carve_depth: Some("3mm".to_string()), ..Default::default() };
+        let desc = GCodeDesc {
+            carve_depth: Some("3mm".to_string()),
+            ..Default::default()
+        };
         let element = path_element(&doc, Some(desc));
 
         let buf = Rc::new(RefCell::new(Vec::new()));
         let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
         writer.ctx.mm_per_unit = 1.0;
 
-        element.carve(&mut writer, vec![], &FixedResolver(0.0)).unwrap();
+        element
+            .carve(&mut writer, vec![], &FixedResolver(0.0))
+            .unwrap();
 
         let output = String::from_utf8(buf.borrow().clone()).unwrap();
         assert_eq!(output.matches("-- CurrentDepth:").count(), 3);
+    }
+
+    /// Parses the sequence of "CurrentDepth" values out of carve() output
+    /// comments -- distinguishes the actual increment-by-1mm-then-clamp
+    /// ramp algorithm from any pass-count-only-equivalent rewrite.
+    fn current_depths(output: &str) -> Vec<f64> {
+        output
+            .lines()
+            .filter_map(|line| line.strip_prefix("; -- CurrentDepth: "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .filter_map(|token| token.parse::<f64>().ok())
+            .collect()
+    }
+
+    #[test]
+    fn test_carve_fractional_depth_ramps_by_1mm_then_clamps() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let desc = GCodeDesc {
+            carve_depth: Some("2.5mm".to_string()),
+            ..Default::default()
+        };
+        let element = path_element(&doc, Some(desc));
+
+        let buf = Rc::new(RefCell::new(Vec::new()));
+        let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
+        writer.ctx.mm_per_unit = 1.0;
+
+        element
+            .carve(&mut writer, vec![], &FixedResolver(0.0))
+            .unwrap();
+
+        let output = String::from_utf8(buf.borrow().clone()).unwrap();
+        assert_eq!(current_depths(&output), vec![1.0, 2.0, 2.5]);
+    }
+
+    #[test]
+    fn test_carve_zero_depth_runs_no_passes() {
+        let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let desc = GCodeDesc {
+            carve_depth: Some("0mm".to_string()),
+            ..Default::default()
+        };
+        let element = path_element(&doc, Some(desc));
+
+        let buf = Rc::new(RefCell::new(Vec::new()));
+        let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
+        writer.ctx.mm_per_unit = 1.0;
+
+        element
+            .carve(&mut writer, vec![], &FixedResolver(0.0))
+            .unwrap();
+
+        let output = String::from_utf8(buf.borrow().clone()).unwrap();
+        assert!(current_depths(&output).is_empty());
     }
 
     #[test]
     fn test_carve_sentinel_depth_uses_resolver() {
         let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
         let doc = roxmltree::Document::parse(xml).unwrap();
-        let desc = GCodeDesc { carve_depth: Some("full".to_string()), ..Default::default() };
+        let desc = GCodeDesc {
+            carve_depth: Some("full".to_string()),
+            ..Default::default()
+        };
         let element = path_element(&doc, Some(desc));
 
         let buf = Rc::new(RefCell::new(Vec::new()));
         let mut writer = GCodeWriter::new(Box::new(SharedBuf(buf.clone())));
         writer.ctx.mm_per_unit = 1.0;
 
-        element.carve(&mut writer, vec![], &FixedResolver(2.0)).unwrap();
+        element
+            .carve(&mut writer, vec![], &FixedResolver(2.0))
+            .unwrap();
 
         let output = String::from_utf8(buf.borrow().clone()).unwrap();
         assert_eq!(output.matches("-- CurrentDepth:").count(), 2);
@@ -912,7 +1032,10 @@ mod tests {
     fn test_carve_sentinel_resolver_error_aborts() {
         let xml = r#"<svg xmlns="http://www.w3.org/2000/svg"><path d="M 0,0 L 10,0"/></svg>"#;
         let doc = roxmltree::Document::parse(xml).unwrap();
-        let desc = GCodeDesc { carve_depth: Some("full".to_string()), ..Default::default() };
+        let desc = GCodeDesc {
+            carve_depth: Some("full".to_string()),
+            ..Default::default()
+        };
         let element = path_element(&doc, Some(desc));
 
         let mut writer = GCodeWriter::new(Box::new(Vec::new()));
@@ -931,6 +1054,8 @@ mod tests {
         let mut writer = GCodeWriter::new(Box::new(Vec::new()));
         writer.ctx.mm_per_unit = 1.0;
 
-        element.carve(&mut writer, vec![], &FailingResolver).unwrap();
+        element
+            .carve(&mut writer, vec![], &FailingResolver)
+            .unwrap();
     }
 }
